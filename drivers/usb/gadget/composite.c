@@ -1695,3 +1695,10 @@ void usb_composite_setup_continue(struct usb_composite_dev *cdev)
 	spin_unlock_irqrestore(&cdev->lock, flags);
 }
 
+
+extern int get_udc_state(void);
+int composite_get_udc_state(void)
+{
+	//printk("^^^^ get_udc_state %d\n", the_usb_info->sdev.state);
+	return get_udc_state();
+}

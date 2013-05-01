@@ -1235,7 +1235,9 @@ static int msm_rotator_start(unsigned long arg,
 	int s, is_rgb = 0;
 	int first_free_index = INVALID_SESSION;
 	unsigned int dst_w, dst_h;
-
+#ifdef CONFIG_F_SKYDISP_BUG_FIX_YUV_REVERSE	
+       int need_resend=0; 
+#endif	   
 	if (copy_from_user(&info, (void __user *)arg, sizeof(info)))
 		return -EFAULT;
 
@@ -1310,6 +1312,10 @@ static int msm_rotator_start(unsigned long arg,
 			(info.session_id ==
 			(unsigned int)msm_rotator_dev->img_info[s]
 			)) {
+#ifdef CONFIG_F_SKYDISP_BUG_FIX_YUV_REVERSE			
+			 if(msm_rotator_dev->img_info[s]->dst.format!=info.dst.format) 
+                      need_resend=1; 
+#endif			 
 			*(msm_rotator_dev->img_info[s]) = info;
 			msm_rotator_dev->fd_info[s] = fd_info;
 
@@ -1324,8 +1330,17 @@ static int msm_rotator_start(unsigned long arg,
 			INVALID_SESSION))
 			first_free_index = s;
 	}
-
+#ifdef CONFIG_F_SKYDISP_BUG_FIX_YUV_REVERSE
+	//if ((s == MAX_SESSIONS) && (first_free_index != INVALID_SESSION)) {
+	   if(need_resend){ 
+          if (copy_to_user((void __user *)arg, &info, sizeof(info))) 
+          rc = -EFAULT; 
+          printk(KERN_ERR "j:%s error handle for rotator session\n", __func__); 
+          } 
+          else if ((s == MAX_SESSIONS) && (first_free_index != INVALID_SESSION)) { 
+#else
 	if ((s == MAX_SESSIONS) && (first_free_index != INVALID_SESSION)) {
+#endif
 		/* allocate a session id */
 		msm_rotator_dev->img_info[first_free_index] =
 			kzalloc(sizeof(struct msm_rotator_img_info),

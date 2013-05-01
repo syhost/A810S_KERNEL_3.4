@@ -20,7 +20,12 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/vibrator.h>
 
+#include <linux/pm_runtime.h>
+
 #include "../staging/android/timed_output.h"
+#define VIBRATOR_PANTECH_PATCH //P12911
+// ----------------------------------------------------------------
+#define FEATURE_LEVEL_CONTROL
 
 #define VIB_DRV			0x4A
 
@@ -120,7 +125,8 @@ static int pm8xxx_vib_set(struct pm8xxx_vib *vib, int on)
 	u8 val;
 
 	if (on) {
-		val = vib->reg_vib_drv;
+		//val = vib->reg_vib_drv;
+		val = 0;
 		val |= ((vib->level << VIB_DRV_SEL_SHIFT) & VIB_DRV_SEL_MASK);
 		rc = pm8xxx_vib_write_u8(vib, val, VIB_DRV);
 		if (rc < 0)
@@ -140,6 +146,55 @@ static int pm8xxx_vib_set(struct pm8xxx_vib *vib, int on)
 }
 
 static void pm8xxx_vib_enable(struct timed_output_dev *dev, int value)
+#ifdef FEATURE_LEVEL_CONTROL
+{
+	struct pm8xxx_vib *vib = container_of(dev, struct pm8xxx_vib,
+					 timed_dev);
+	unsigned long flags;
+
+	unsigned short level;
+	long timeoutms;
+
+#ifdef VIBRATOR_PANTECH_PATCH
+retry:
+	spin_lock_irqsave(&vib->lock, flags);
+	if (hrtimer_try_to_cancel(&vib->vib_timer) < 0) {
+		spin_unlock_irqrestore(&vib->lock, flags);
+		cpu_relax();
+		goto retry;
+	}
+#else
+	spin_lock_irqsave(&vib->lock, flags);
+	 hrtimer_cancel(&vib->vib_timer);
+#endif
+
+	level = (value>>16) & 0xFFFF;
+	timeoutms = value & 0xFFFF;
+
+	if(level>0) {
+		//level = ((level*85)/100) + 3 + 11;
+		//level = ((level*75)/100) + 5 + 11;
+		level = ((level*70)/100) + 6 + 11; //1.7v ~ 3.1v
+	}
+	vib->level = level;
+
+	if (timeoutms == 0)
+		vib->state = 0;
+	else {
+		timeoutms = (timeoutms > vib->pdata->max_timeout_ms ?
+				 0x7FFFFFFF : timeoutms);
+		vib->state = 1;
+		hrtimer_start(&vib->vib_timer,
+			      ktime_set(timeoutms / 1000, (timeoutms % 1000) * 1000000),
+			      HRTIMER_MODE_REL);
+	}
+	spin_unlock_irqrestore(&vib->lock, flags);
+
+	//p12279 Fixed. 
+	pm8xxx_vib_set(vib, vib->state);	
+//	schedule_work(&vib->work);
+}
+#else
 {
 	struct pm8xxx_vib *vib = container_of(dev, struct pm8xxx_vib,
 					 timed_dev);
@@ -166,6 +221,7 @@ retry:
 	spin_unlock_irqrestore(&vib->lock, flags);
 	schedule_work(&vib->work);
 }
+#endif
 
 static void pm8xxx_vib_update(struct work_struct *work)
 {
@@ -270,7 +326,11 @@ static int __devinit pm8xxx_vib_probe(struct platform_device *pdev)
 	if (rc < 0)
 		goto err_read_vib;
 
+#ifdef FEATURE_LEVEL_CONTROL
+//	pmic8058_vib_enable(&vib->timed_dev, ( (first_level<<16) & 0xFFFF0000) | ( pdata->initial_vibrate_ms & 0x0000FFFF));
+#else
 	pm8xxx_vib_enable(&vib->timed_dev, pdata->initial_vibrate_ms);
+#endif
 
 	platform_set_drvdata(pdev, vib);
 

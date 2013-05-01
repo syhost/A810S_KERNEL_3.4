@@ -32,4 +32,8 @@ void msm_hs_request_clock_off(struct uart_port *uport);
 void msm_hs_request_clock_on(struct uart_port *uport);
 void msm_hs_set_mctrl(struct uart_port *uport,
 				    unsigned int mctrl);
+
+#if 1		  
+struct uart_port * msm_hs_get_bt_uport(unsigned int line);
+#endif
 #endif

@@ -28,17 +28,31 @@
 #include <asm/atomic.h>
 
 #include <mach/msm_hsusb.h>
-
+//pz1946 20110904 battery remove issue
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+#include <linux/reboot.h>
+#endif  //CONFIG_SKY_CHARGING
 #define MSM_CHG_MAX_EVENTS		16
 #define CHARGING_TEOC_MS		9000000
 #define UPDATE_TIME_MS			60000
 #define RESUME_CHECK_PERIOD_MS		60000
 
+#ifdef CONFIG_SKY_SMB_CHARGER
+#define DEFAULT_BATT_MAX_V		4350
+#else
 #define DEFAULT_BATT_MAX_V		4200
+#endif
 #define DEFAULT_BATT_MIN_V		3200
 
 #define MSM_CHARGER_GAUGE_MISSING_VOLTS 3500
 #define MSM_CHARGER_GAUGE_MISSING_TEMP  35
+
+#define SKY_BATTERY_INFO //2011.09.15 leecy add for battery info
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+#define MSM_CHARGER_TA_CURRENT_INCALL 700//700//800//400
+#define MSM_CHARGER_TA_CURRENT_IDLE  700//700//800//700//900  // p14682 kobj 110711 change 
+#endif  //CONFIG_SKY_CHARGING
 /**
  * enum msm_battery_status
  * @BATT_STATUS_ABSENT: battery not present
@@ -108,11 +122,125 @@ struct msm_charger_mux {
 	struct work_struct queue_work;
 	struct workqueue_struct *event_wq_thread;
 	struct wake_lock wl;
+//pz1946 20111108 carkit-charger
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+    unsigned int charger_type;
+	unsigned int chargerdone; 
+	//unsigned int event_type;
+#endif  //CONFIG_SKY_CHARGING
 };
+//pz1946 20110902 usb ac display
+#ifdef CONFIG_SKY_SMB_CHARGER
+extern int smb_charger_state;
+//pz1946 20110914 factroy cable debug
+extern int pm8058_is_factory_cable(void);
+#endif
 
 static struct msm_charger_mux msm_chg;
 
 static struct msm_battery_gauge *msm_batt_gauge;
+#ifdef CONFIG_PANTECH_FB_MSM_MHL_SII9244 // MHL_KKCHO
+#define F_MHL_AUTO_CONNECT
+#endif
+
+#ifdef F_MHL_AUTO_CONNECT
+extern void MHL_Set_cable_detect_handler(void);
+
+
+#define MHL_CABLE_CONNCET			1
+#define MHL_CABLE_DISCONNCET	       0
+#endif
+
+#ifdef CONFIG_PANTECH_MHL_CABLE_DETECT
+static int is_mhl;
+#endif
+
+#ifdef CONFIG_SKY_BATTERY_MAX17040
+extern int max17040_get_charge_state(void);
+#endif
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+extern void pm8058_chg_set_current_temperature(int chg_current);
+extern int pmic8058_tz_get_temp_charging(unsigned long *temp);
+extern void pm8058_chg_set_current_incall(int chg_current);
+
+extern void pm8058_set_fast_charging_mode(void);
+extern void pm8058_set_out_range_temp(void);
+extern void pm8058_set_in_range_temp(void);
+extern void test_rest_trickle_val(void);
+
+static unsigned int old_status = 0;
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+static unsigned int is_charger_done = 0;
+
+unsigned int msm_charger_is_done(void)
+{
+        return is_charger_done;
+}
+
+void msm_charger_set_init_done(void)
+{
+        is_charger_done = 0;
+}
+EXPORT_SYMBOL(msm_charger_set_init_done);
+
+#endif 
+
+unsigned int msm_charger_is_incall(void)
+{
+        return old_status;
+}
+
+void msm_charger_set_current_incall(unsigned int in_call)
+{
+        int chg_current;
+
+        if(old_status == in_call)
+                return;
+        else
+                old_status = in_call;
+
+        if(in_call)
+                chg_current = MSM_CHARGER_TA_CURRENT_INCALL;
+        else
+                chg_current = MSM_CHARGER_TA_CURRENT_IDLE;
+            
+	if (msm_chg.current_chg_priv
+		&& (msm_chg.current_chg_priv->hw_chg_state
+			== CHG_READY_STATE || msm_chg.current_chg_priv->hw_chg_state
+			== CHG_CHARGING_STATE) && msm_chg.charger_type == CHG_TYPE_AC) {
+			pm8058_chg_set_current_incall(chg_current);
+	}
+}
+EXPORT_SYMBOL(msm_charger_set_current_incall);
+
+void msm_charger_set_lcd_onoff(unsigned int onoff)
+{
+        int chg_current;
+
+        if(msm_charger_is_incall())
+                return;
+            
+        if(onoff)
+                chg_current = 700;
+        else
+                chg_current = 900;
+            
+	if (msm_chg.current_chg_priv
+		&& (msm_chg.current_chg_priv->hw_chg_state
+			== CHG_READY_STATE || msm_chg.current_chg_priv->hw_chg_state
+			== CHG_CHARGING_STATE) && msm_chg.charger_type == CHG_TYPE_AC) {
+			pm8058_chg_set_current_temperature(chg_current);
+	}
+}
+EXPORT_SYMBOL(msm_charger_set_lcd_onoff);
+#endif  //CONFIG_SKY_CHARGING
+
+//20120719 refer to presto
+#if defined (CONFIG_MACH_MSM8X60_EF39S)
+extern int pmic8058_tz_get_temp_charging(unsigned long *temp);
+#endif
 
 static int is_chg_capable_of_charging(struct msm_hardware_charger_priv *priv)
 {
@@ -140,6 +268,13 @@ static int is_batt_status_charging(void)
 		return 1;
 	return 0;
 }
+
+#ifdef CONFIG_SKY_BATTERY_MAX17040
+int sky_get_plug_state(void)
+{
+        return is_batt_status_charging();
+}
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 
 static int is_battery_present(void)
 {
@@ -171,6 +306,46 @@ static int is_battery_id_valid(void)
 	}
 }
 
+#ifdef F_MHL_AUTO_CONNECT
+static int is_mhl_cable(void)
+{
+	if (msm_batt_gauge && msm_batt_gauge->is_mhl_cable)
+		return msm_batt_gauge->is_mhl_cable();
+	else {
+		pr_err("msm-charger no is_mhl_cable\n");
+		return 0;
+	}
+}
+#endif
+#ifdef CONFIG_PANTECH_MHL_CABLE_DETECT
+int is_mhl_mode(void)
+{
+	if(is_mhl){
+		is_mhl = 1;
+		return 1;
+	}else{
+		is_mhl = 0;
+		return 0;
+	}
+}
+void set_flag_mhl_mode(int val)
+{
+	is_mhl = val;
+}
+#endif
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+static int is_factory_cable(void)
+{
+	if (msm_batt_gauge && msm_batt_gauge->is_factory_cable)
+		return msm_batt_gauge->is_factory_cable();
+	else {
+		pr_err("msm-charger no is_factory_cable\n");
+		return 0;
+	}
+}
+#endif  //CONFIG_SKY_CHARGING
+
 static int get_prop_battery_mvolts(void)
 {
 	if (msm_batt_gauge && msm_batt_gauge->get_battery_mvolts)
@@ -180,7 +355,7 @@ static int get_prop_battery_mvolts(void)
 		return MSM_CHARGER_GAUGE_MISSING_VOLTS;
 	}
 }
-
+#ifdef CONFIG_SKY_CHARGING		//temp	// p14682 kobj 110816
 static int get_battery_temperature(void)
 {
 	if (msm_batt_gauge && msm_batt_gauge->get_battery_temperature)
@@ -190,7 +365,15 @@ static int get_battery_temperature(void)
 		return MSM_CHARGER_GAUGE_MISSING_TEMP;
 	}
 }
+int Presto_get_batt_temp(void)				// p14682 kobj 110915
+{
+	return get_battery_temperature();
+}
+EXPORT_SYMBOL(Presto_get_batt_temp);
 
+#endif //CONFIG_SKY_CHARGING
+
+#ifndef CONFIG_SKY_BATTERY_MAX17040
 static int get_prop_batt_capacity(void)
 {
 	int capacity;
@@ -205,6 +388,7 @@ static int get_prop_batt_capacity(void)
 
 	return capacity;
 }
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 
 static int get_prop_batt_health(void)
 {
@@ -235,7 +419,9 @@ static int get_prop_charge_type(void)
 static int get_prop_batt_status(void)
 {
 	int status = 0;
-
+#ifdef CONFIG_SKY_BATTERY_MAX17040
+	int state = 0;
+#endif
 	if (msm_batt_gauge && msm_batt_gauge->get_battery_status) {
 		status = msm_batt_gauge->get_battery_status();
 		if (status == POWER_SUPPLY_STATUS_CHARGING ||
@@ -244,6 +430,28 @@ static int get_prop_batt_status(void)
 			return status;
 	}
 
+#ifdef CONFIG_SKY_BATTERY_MAX17040
+        if (is_batt_status_charging())
+        {
+                state=max17040_get_charge_state();
+                if(state)
+                        status = POWER_SUPPLY_STATUS_FULL;
+                else
+                        status = POWER_SUPPLY_STATUS_CHARGING;				
+        }
+        else if (msm_chg.batt_status ==
+                BATT_STATUS_JUST_FINISHED_CHARGING
+                && msm_chg.current_chg_priv != NULL)
+        {
+                state=max17040_get_charge_state();
+                if(state)
+                        status = POWER_SUPPLY_STATUS_FULL;
+                else
+                        status = POWER_SUPPLY_STATUS_CHARGING;				
+        }
+        else
+                status = POWER_SUPPLY_STATUS_DISCHARGING;
+#else
 	if (is_batt_status_charging())
 		status = POWER_SUPPLY_STATUS_CHARGING;
 	else if (msm_chg.batt_status ==
@@ -252,6 +460,7 @@ static int get_prop_batt_status(void)
 		status = POWER_SUPPLY_STATUS_FULL;
 	else
 		status = POWER_SUPPLY_STATUS_DISCHARGING;
+#endif
 
 	return status;
 }
@@ -260,6 +469,14 @@ static int get_prop_batt_status(void)
 static void update_batt_status(void)
 {
 	if (is_battery_present()) {
+//#ifdef CONFIG_SKY_CHARGING			// p14682 kobj 110621
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427
+        	if (msm_chg.batt_status == BATT_STATUS_ABSENT
+        		|| msm_chg.batt_status
+        			== BATT_STATUS_ID_INVALID) {
+        		msm_chg.batt_status = BATT_STATUS_DISCHARGING;
+                }
+#else	//CONFIG_SKY_CHARGING	
 		if (is_battery_id_valid()) {
 			if (msm_chg.batt_status == BATT_STATUS_ABSENT
 				|| msm_chg.batt_status
@@ -268,6 +485,7 @@ static void update_batt_status(void)
 			}
 		} else
 			msm_chg.batt_status = BATT_STATUS_ID_INVALID;
+#endif 	//CONFIG_SKY_CHARGING	
 	 } else
 		msm_chg.batt_status = BATT_STATUS_ABSENT;
 }
@@ -275,11 +493,16 @@ static void update_batt_status(void)
 static enum power_supply_property msm_power_props[] = {
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
+#ifdef CONFIG_SKY_CHARGING  //p14682 kobj 110816
+	POWER_SUPPLY_PROP_TEMP,
+#endif 	
 };
 
 static char *msm_power_supplied_to[] = {
 	"battery",
 };
+//pz1946 20111108 position change here
+static struct msm_hardware_charger_priv *usb_hw_chg_priv;
 
 static int msm_power_get_property(struct power_supply *psy,
 				  enum power_supply_property psp,
@@ -293,9 +516,54 @@ static int msm_power_get_property(struct power_supply *psy,
 		val->intval = !(priv->hw_chg_state == CHG_ABSENT_STATE);
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
+#if defined(CONFIG_SKY_CHARGING)  //kobj 110513
+                if(msm_chg.charger_type == CHG_TYPE_USB)
+                        val->intval = 1;
+                else if(msm_chg.charger_type == CHG_TYPE_AC)
+                        val->intval = 2;
+                else if(msm_chg.charger_type == CHG_TYPE_FACTORY)
+                        val->intval = 3;
+                else
+            	{
+                        val->intval = 0;
+					//	pr_info("[SKY CHG kobj] msm_power_get_property connect =%d\n", val->intval);
+
+            	}
+
+#else  //CONFIG_SKY_CHARGING
+#if defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427
+#if 0 //pz1946 debug
 		val->intval = (priv->hw_chg_state == CHG_READY_STATE)
 			|| (priv->hw_chg_state == CHG_CHARGING_STATE);
+#else
+//pz1946 20111108 carkit-charger
+	//pr_info("[~~~~~pz1946~~~~] smb_charger_state =%d\n", smb_charger_state);
+
+	if(smb_charger_state == CHG_TYPE_USB) {
+		//msm_chg.charger_type = CHG_TYPE_USB;
+		val->intval = 1;
+	}
+	else if(smb_charger_state == CHG_TYPE_AC) {
+		//msm_chg.charger_type = CHG_TYPE_AC;
+		val->intval = 2;
+	}
+	else if(smb_charger_state == CHG_TYPE_FACTORY) {
+		//msm_chg.charger_type = CHG_TYPE_FACTORY;
+		val->intval = 3;
+	}
+	else {
+		//msm_chg.charger_type = CHG_TYPE_NONE;
+		val->intval = 0;
+	}
+#endif
+#endif
+#endif  //CONFIG_SKY_CHARGING
 		break;
+#ifdef CONFIG_SKY_CHARGING  //p14682 kobj 110816
+	case POWER_SUPPLY_PROP_TEMP:
+		val->intval = (get_battery_temperature()-0)*10;
+		break;
+#endif 
 	default:
 		return -EINVAL;
 	}
@@ -310,8 +578,10 @@ static enum power_supply_property msm_batt_power_props[] = {
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+#ifndef CONFIG_SKY_BATTERY_MAX17040
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CAPACITY,
+#endif	//CONFIG_SKY_BATTERY_MAX17040
 };
 
 static int msm_batt_power_get_property(struct power_supply *psy,
@@ -332,7 +602,11 @@ static int msm_batt_power_get_property(struct power_supply *psy,
 		val->intval = !(msm_chg.batt_status == BATT_STATUS_ABSENT);
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
+#ifdef SKY_BATTERY_INFO		
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+#else
 		val->intval = POWER_SUPPLY_TECHNOLOGY_NiMH;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
 		val->intval = msm_chg.max_voltage * 1000;
@@ -340,12 +614,16 @@ static int msm_batt_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 		val->intval = msm_chg.min_voltage * 1000;
 		break;
+#ifndef CONFIG_SKY_BATTERY_MAX17040
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = get_prop_battery_mvolts();
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		val->intval = get_prop_batt_capacity();
+		//20110323 choiseulkee chg for EF39S bring-up, please check Battery
+		val->intval = 100;
 		break;
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 	default:
 		return -EINVAL;
 	}
@@ -361,7 +639,8 @@ static struct power_supply msm_psy_batt = {
 };
 
 static int usb_chg_current;
-static struct msm_hardware_charger_priv *usb_hw_chg_priv;
+//pz1946 20111108 position change
+//static struct msm_hardware_charger_priv *usb_hw_chg_priv;
 static void (*notify_vbus_state_func_ptr)(int);
 static int usb_notified_of_insertion;
 
@@ -379,6 +658,30 @@ void msm_charger_unregister_vbus_sn(void (*callback)(int))
 	pr_debug(KERN_INFO "%s\n", __func__);
 	notify_vbus_state_func_ptr = NULL;
 }
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+unsigned int hold_mA;
+
+static void msm_charge_called_before_init(unsigned int mA)
+{
+        pr_info("[SKY CHG] msm_charge_called_before_init with mA =%d\n",hold_mA);
+
+        if(hold_mA == 500)
+                msm_chg.charger_type = CHG_TYPE_USB;
+#ifdef CONFIG_SKY_CHARGING  // p14682 kobj 110816
+        else if(hold_mA == 700/*900*/)  // p14682 kobj 110816
+#else
+        else if(hold_mA == 900)  
+#endif 
+                msm_chg.charger_type = CHG_TYPE_AC;
+        else
+                return;
+
+        usb_hw_chg_priv->max_source_current = hold_mA;
+        msm_charger_notify_event(usb_hw_chg_priv->hw_chg,
+                CHG_ENUMERATED_EVENT);
+}
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 
 static void notify_usb_of_the_plugin_event(struct msm_hardware_charger_priv
 					   *hw_chg, int plugin)
@@ -405,6 +708,14 @@ static void notify_usb_of_the_plugin_event(struct msm_hardware_charger_priv
 		usb_notified_of_insertion = 0;
 		usb_hw_chg_priv = NULL;
 	}
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+        if(hold_mA && plugin)
+        {
+                msm_charge_called_before_init(hold_mA);
+                hold_mA = 0;
+        }
+#endif    //CONFIG_SKY_BATTERY_MAX17040
 }
 
 static unsigned int msm_chg_get_batt_capacity_percent(void)
@@ -506,6 +817,10 @@ static int msm_start_charging(void)
 	int ret;
 	struct msm_hardware_charger_priv *priv;
 
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513		
+			msm_charger_set_init_done();
+#endif
+
 	priv = msm_chg.current_chg_priv;
 	wake_lock(&msm_chg.wl);
 	ret = priv->hw_chg->start_charging(priv->hw_chg, msm_chg.max_voltage,
@@ -559,6 +874,16 @@ static void teoc(struct work_struct *work)
 
 static void handle_battery_inserted(void)
 {
+#if 0 //def CONFIG_SKY_SMB_CHARGER //novapex jcpark 120511
+	if (msm_chg.batt_status != BATT_STATUS_ABSENT)
+	{
+		if (pm8058_is_factory_cable())
+		{
+			usb_hw_chg_priv->max_source_current = 500;
+		}
+	}
+#endif // CONFIG_SKY_SMB_CHARGER
+
 	/* if a charger is already present start charging */
 	if (msm_chg.current_chg_priv != NULL &&
 	    is_batt_status_capable_of_charging() &&
@@ -578,10 +903,29 @@ static void handle_battery_inserted(void)
 							     (msm_chg.
 							      safety_time)));
 	}
+//#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427
+	if (msm_chg.current_chg_priv == NULL) {
+                msm_chg.batt_status = BATT_STATUS_DISCHARGING;
+        }
+#endif  //CONFIG_SKY_CHARGING
 }
 
 static void handle_battery_removed(void)
 {
+#if 0 //def CONFIG_SKY_SMB_CHARGER //novapex jcpark 120511
+	if (msm_chg.batt_status == BATT_STATUS_ABSENT)
+	{
+		if (pm8058_is_factory_cable())
+		{
+			usb_hw_chg_priv->max_source_current = 1500;
+			msm_charger_notify_event(usb_hw_chg_priv->hw_chg,
+						CHG_ENUMERATED_EVENT);
+			return;
+		}
+	}
+#endif // CONFIG_SKY_SMB_CHARGER
+
 	/* if a charger is charging the battery stop it */
 	if (msm_chg.current_chg_priv != NULL
 	    && msm_chg.current_chg_priv->hw_chg_state == CHG_CHARGING_STATE) {
@@ -599,12 +943,23 @@ static void handle_battery_removed(void)
 
 static void update_heartbeat(struct work_struct *work)
 {
+#ifdef CONFIG_SKY_CHARGING
 	int temperature;
+#endif
+
+//20120719 refer to presto
+#ifdef CONFIG_MACH_MSM8X60_EF39S
+    unsigned long temperature_tmp;
+#endif
 
 	if (msm_chg.batt_status == BATT_STATUS_ABSENT
 		|| msm_chg.batt_status == BATT_STATUS_ID_INVALID) {
 		if (is_battery_present())
-			if (is_battery_id_valid()) {
+//#ifndef CONFIG_SKY_CHARGING	// p14682 kobj 110620 			
+#if !defined(CONFIG_SKY_CHARGING) && !defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427
+			if (is_battery_id_valid()) 
+#endif //CONFIG_SKY_CHARGING
+			{
 				msm_chg.batt_status = BATT_STATUS_DISCHARGING;
 				handle_battery_inserted();
 			}
@@ -624,6 +979,13 @@ static void update_heartbeat(struct work_struct *work)
 	}
 	pr_debug("msm-charger %s batt_status= %d\n",
 				__func__, msm_chg.batt_status);
+		
+#ifdef CONFIG_SKY_CHARGING	// p14682 kobj 110816		
+	pr_info("[SKY CHG]msm-charger %s batt_status= %d, get_prop_battery_mvolts = %d\n",
+					__func__, msm_chg.batt_status, get_prop_battery_mvolts());//get_battery_mvolts());	// kobj 110513
+
+	pr_info("[SKY CHG]msm-charger %s charger_type= %d, get_battery_temperature = %d\n",
+					__func__, msm_chg.charger_type, get_battery_temperature());//get_battery_mvolts());	// kobj 110513
 
 	if (msm_chg.current_chg_priv
 		&& msm_chg.current_chg_priv->hw_chg_state
@@ -631,7 +993,15 @@ static void update_heartbeat(struct work_struct *work)
 		temperature = get_battery_temperature();
 		/* TODO implement JEITA SPEC*/
 	}
+#endif
 
+//20120719 refer to presto
+#if defined (CONFIG_MACH_MSM8X60_EF39S)
+    //20120718 refer to presto.
+    pmic8058_tz_get_temp_charging(&temperature_tmp);
+//	pr_info("+++pm8058 %s pmic8058_tz_get_temp_charging = %d +++\n",
+//					__func__, (int)temperature_tmp);
+#endif
 	/* notify that the voltage has changed
 	 * the read of the capacity will trigger a
 	 * voltage read*/
@@ -684,15 +1054,23 @@ static void handle_charger_ready(struct msm_hardware_charger_priv *hw_chg_priv)
 		dev_info(msm_chg.dev,
 			 "%s: best charger = %s\n", __func__,
 			 msm_chg.current_chg_priv->hw_chg->name);
-
+#ifdef CONFIG_SKY_CHARGING		 
+		if(get_prop_battery_mvolts()>MSM_CHARGER_GAUGE_MISSING_VOLTS)
 		msm_enable_system_current(msm_chg.current_chg_priv);
+#else
+		msm_enable_system_current(msm_chg.current_chg_priv);
+#endif 
 		/*
 		 * since a better charger was chosen, ask the old
 		 * charger to stop providing system current
 		 */
+#ifdef CONFIG_SKY_CHARGING		 
+		if ((old_chg_priv != NULL)&&(get_prop_battery_mvolts()>MSM_CHARGER_GAUGE_MISSING_VOLTS))
+			msm_disable_system_current(old_chg_priv);
+#else
 		if (old_chg_priv != NULL)
 			msm_disable_system_current(old_chg_priv);
-
+#endif 
 		if (!is_batt_status_capable_of_charging())
 			return;
 
@@ -728,7 +1106,12 @@ static void handle_charger_removed(struct msm_hardware_charger_priv
 	debug_print(__func__, hw_chg_removed);
 
 	if (msm_chg.current_chg_priv == hw_chg_removed) {
+#ifdef CONFIG_SKY_CHARGING	
+		if(get_prop_battery_mvolts()>MSM_CHARGER_GAUGE_MISSING_VOLTS)
+			msm_disable_system_current(hw_chg_removed);
+#else
 		msm_disable_system_current(hw_chg_removed);
+#endif 
 		if (msm_chg.current_chg_priv->hw_chg_state
 						== CHG_CHARGING_STATE) {
 			if (msm_stop_charging(hw_chg_removed)) {
@@ -753,7 +1136,12 @@ static void handle_charger_removed(struct msm_hardware_charger_priv
 				msm_chg.batt_status = BATT_STATUS_DISCHARGING;
 		} else {
 			msm_chg.current_chg_priv = hw_chg_priv;
+#ifdef CONFIG_SKY_CHARGING	
+			if(get_prop_battery_mvolts()>MSM_CHARGER_GAUGE_MISSING_VOLTS)
+				msm_enable_system_current(hw_chg_priv);
+#else
 			msm_enable_system_current(hw_chg_priv);
+#endif 
 			dev_info(msm_chg.dev,
 				 "%s: best charger = %s\n", __func__,
 				 msm_chg.current_chg_priv->hw_chg->name);
@@ -787,6 +1175,16 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 	if (hw_chg)
 		priv = hw_chg->charger_private;
 
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427
+	//msm_chg.event_type = event;
+	if(hw_chg)				// p14682 kobj add  110726
+		dev_info(msm_chg.dev, "[SKY CHG]%s %d from %s\n", __func__, event, hw_chg->name);
+	if (priv)
+		dev_info(msm_chg.dev, "[SKY CHG]%s priv->max_source_current = %d\n", __func__, priv->max_source_current);
+#else  //CONFIG_SKY_CHARGING
+	if(hw_chg)				// p14682 kobj add 110726
+		dev_info(msm_chg.dev, "%s %d from %s\n", __func__, event, hw_chg->name);
+#endif  //CONFIG_SKY_CHARGING
 	mutex_lock(&msm_chg.status_lock);
 
 	switch (event) {
@@ -799,6 +1197,16 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 		}
 		update_batt_status();
 		if (hw_chg->type == CHG_TYPE_USB) {
+//#ifdef CONFIG_SKY_CHARGING /* default setting */  //kobj 110513
+#if defined(CONFIG_SKY_CHARGING)
+                        msm_chg.charger_type = CHG_TYPE_USB;
+#endif //CONFIG_SKY_CHARGING
+#if 0 //defined(CONFIG_SKY_SMB_CHARGER) //novapex jcpark 120427 // jcpark 120601 PLM 132
+			smb_charger_state = CHG_TYPE_USB;
+#endif //CONFIG_SKY_SMB_CHARGER
+
+//pz1946 20111114 
+                        //msm_chg.charger_type = CHG_TYPE_USB;
 			priv->hw_chg_state = CHG_PRESENT_STATE;
 			notify_usb_of_the_plugin_event(priv, 1);
 			if (usb_chg_current) {
@@ -812,6 +1220,8 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 			priv->hw_chg_state = CHG_READY_STATE;
 			handle_charger_ready(priv);
 		}
+//pz1946 20120106 charger connection time no sleep need
+		wake_lock(&msm_chg.wl);
 		break;
 	case CHG_ENUMERATED_EVENT:	/* only in USB types */
 		if (priv->hw_chg_state == CHG_ABSENT_STATE) {
@@ -819,6 +1229,28 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 				 hw_chg->name);
 			break;
 		}
+		
+#ifdef F_MHL_AUTO_CONNECT
+		if(is_mhl_cable())
+		{
+#ifdef CONFIG_PANTECH_MHL_CABLE_DETECT
+		    is_mhl = 1;
+#endif
+            MHL_Set_cable_detect_handler();
+			printk(KERN_ERR "[SKY_MHL]%s MHL cable Connect \n",__func__);			
+		}
+#ifdef CONFIG_PANTECH_MHL_CABLE_DETECT
+		else
+		{
+		    is_mhl = 0;
+		}
+#endif
+#endif
+		
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+                if(is_factory_cable())
+                    msm_chg.charger_type = CHG_TYPE_FACTORY;
+#endif //CONFIG_SKY_CHARGING  
 		update_batt_status();
 		dev_dbg(msm_chg.dev, "%s enum with %dmA to draw\n",
 			 hw_chg->name, priv->max_source_current);
@@ -847,8 +1279,16 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 			notify_usb_of_the_plugin_event(priv, 0);
 		}
 		handle_charger_removed(priv, CHG_ABSENT_STATE);
+#ifdef CONFIG_SKY_CHARGING /* default setting */  //kobj 110513
+                msm_chg.charger_type = CHG_TYPE_NONE;
+#endif  //CONFIG_SKY_CHARGING
+//pz1946 20120106 charger connection time no sleep need
+		wake_unlock(&msm_chg.wl);
 		break;
 	case CHG_DONE_EVENT:
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513		
+		is_charger_done = 1;
+#endif
 		if (priv->hw_chg_state == CHG_CHARGING_STATE)
 			handle_charging_done(priv);
 		break;
@@ -865,6 +1305,8 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 	case CHG_BATT_TEMP_OUTOFRANGE:
 		/* the batt_temp out of range can trigger
 		 * when the battery is absent */
+		dev_info(msm_chg.dev, "%s CHG_BATT_TEMP_OUTOFRANGE\n",
+		hw_chg->name);
 		if (!is_battery_present()
 		    && msm_chg.batt_status != BATT_STATUS_ABSENT) {
 			msm_chg.batt_status = BATT_STATUS_ABSENT;
@@ -877,6 +1319,8 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 		handle_battery_removed();
 		break;
 	case CHG_BATT_TEMP_INRANGE:
+		dev_info(msm_chg.dev, "%s CHG_BATT_TEMP_INRANGE\n",
+		hw_chg->name);		
 		if (msm_chg.batt_status != BATT_STATUS_TEMPERATURE_OUT_OF_RANGE)
 			break;
 		msm_chg.batt_status = BATT_STATUS_ID_INVALID;
@@ -904,11 +1348,29 @@ static void handle_event(struct msm_hardware_charger *hw_chg, int event)
 		handle_battery_inserted();
 		break;
 	case CHG_BATT_REMOVED:
+//pz1946 20110904 battery remove issue
+//#ifdef CONFIG_SKY_SMB_CHARGER
+//pz1946 20110920 battery remove position change
+#if 0//def CONFIG_SKY_SMB_CHARGER
+		kernel_power_off();
+		mdelay(500);
+#endif
 		if (msm_chg.batt_status == BATT_STATUS_ABSENT)
 			break;
 		/* debounce */
 		if (is_battery_present())
 			break;
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+		if (msm_chg.batt_status == BATT_STATUS_DISCHARGING)
+			break;
+                mdelay(10);
+		if (is_battery_present())
+			break;
+                mdelay(10);
+		if (is_battery_present())
+			break;
+        	machine_power_off();
+#endif  //CONFIG_SKY_CHARGING
 		msm_chg.batt_status = BATT_STATUS_ABSENT;
 		handle_battery_removed();
 		break;
@@ -983,12 +1445,34 @@ static void process_events(struct work_struct *work)
 void msm_charger_vbus_draw(unsigned int mA)
 {
 	if (usb_hw_chg_priv) {
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+                if(mA == 500)
+                    msm_chg.charger_type = CHG_TYPE_USB;
+                else
+                    msm_chg.charger_type = CHG_TYPE_AC;
+#endif //CONFIG_SKY_CHARGING                   
 		usb_hw_chg_priv->max_source_current = mA;
+#if 0 //def CONFIG_SKY_SMB_CHARGER //novapex jcpark 120511
+		if (msm_chg.batt_status == BATT_STATUS_ABSENT)
+		{
+			if (pm8058_is_factory_cable())
+			{
+				usb_hw_chg_priv->max_source_current = 1500;
+			}
+		}
+#endif // CONFIG_SKY_SMB_CHARGER
 		msm_charger_notify_event(usb_hw_chg_priv->hw_chg,
 						CHG_ENUMERATED_EVENT);
 	} else
 		/* remember the current, to be used when charger is ready */
 		usb_chg_current = mA;
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+        if(!usb_hw_chg_priv && mA)
+        {
+                hold_mA = mA;
+        }
+#endif  //CONFIG_SKY_CHARGING
 }
 
 static int determine_initial_batt_status(void)

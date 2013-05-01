@@ -281,6 +281,14 @@ static enum usb_device_state msm_hsusb_get_state(void)
 	return state;
 }
 
+// choi -->
+int get_udc_state(void)
+{
+	return the_usb_info->sdev.state;
+}
+EXPORT_SYMBOL(get_udc_state);
+// choi --<
+
 static ssize_t print_switch_name(struct switch_dev *sdev, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%s\n", DRIVER_NAME);
@@ -307,8 +315,11 @@ static inline enum chg_type usb_get_chg_type(struct usb_info *ui)
 		return USB_CHG_TYPE__SDP;
 	}
 }
-
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER)// novapex jcpark 120427
+#define USB_WALLCHARGER_CHG_CURRENT 700//900 // p14682 kobj 110711 chagne
+#else  //CONFIG_SKY_CHARGING
 #define USB_WALLCHARGER_CHG_CURRENT 1800
+#endif  //CONFIG_SKY_CHARGING
 #define USB_PROPRIETARY_CHG_CURRENT 500
 static int usb_get_max_power(struct usb_info *ui)
 {
@@ -334,6 +345,14 @@ static int usb_get_max_power(struct usb_info *ui)
 
 	if (temp == USB_CHG_TYPE__WALLCHARGER && !ui->proprietary_chg)
 		return USB_WALLCHARGER_CHG_CURRENT;
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER)// P14682 kobj 110620 
+	if(suspended && (temp == USB_CHG_TYPE__SDP))
+		return 500;
+
+	if((ui->usb_state == USB_STATE_ADDRESS) && (temp == USB_CHG_TYPE__SDP))
+		return 500;		
+#endif  //CONFIG_SKY_CHARGING
+
 	else if (ui->pdata->prop_chg)
 		return USB_PROPRIETARY_CHG_CURRENT;
 

@@ -816,6 +816,14 @@ config MSM_USE_TSIF1
 	  The two TSIF cores share the same DM configuration
 	  so they cannot be used simultaneously.
 
+config MACH_MSM8X60_EF40S
+	depends on ARCH_MSM8X60
+	default y
+	bool "MSM8X60 EF40S"
+	select CUST_SKY_H
+	help
+	  Support for the Pantech MSM8x60 EF40S project board. 
+	  
 config MACH_APQ8064_SIM
 	depends on ARCH_APQ8064
 	bool "APQ8064 Simulator"
@@ -873,6 +881,13 @@ config MACH_FSM9XXX_SURF
 	  Support for the Qualcomm FSM9xxx femtocell
 	  chipset based SURF evaluation board and
 	  FFA board.
+
+config CUST_SKY_H
+	bool
+
+if CUST_SKY_H
+source "arch/arm/mach-msm/cust_sky/Kconfig"
+endif
 
 endmenu
 
@@ -1279,7 +1294,7 @@ config MSM_SMD_DEBUG
 	  between the ARM9 and ARM11
 
 config MSM_SDIO_AL
-	depends on ((ARCH_MSM7X30 || MACH_MSM8X60_FUSN_FFA || MACH_TYPE_MSM8X60_FUSION) && HAS_WAKELOCK)
+	depends on ((ARCH_MSM7X30 || MACH_MSM8X60_FUSN_FFA || MACH_TYPE_MSM8X60_FUSION || MACH_MSM8X60_EF40S) && HAS_WAKELOCK)
 	default y
 	tristate "SDIO-Abstraction-Layer"
 	help

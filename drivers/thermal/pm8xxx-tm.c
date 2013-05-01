@@ -82,6 +82,11 @@ enum pmic_thermal_override_mode {
 	SOFTWARE_OVERRIDE_ENABLED,
 };
 
+#ifdef CONFIG_MACH_MSM8X60_EF39S
+//20120718 refer to presto.
+unsigned long tzTemp=35000;
+#endif
+
 static inline int pm8xxx_tm_read_ctrl(struct pm8xxx_tm_chip *chip, u8 *reg)
 {
 	int rc;
@@ -264,6 +269,8 @@ static int pm8xxx_tz_get_temp_pm8058_adc(struct thermal_zone_device *thermal,
 	return 0;
 }
 
+// jcpark 120629 market 27223 debugging 
+#ifndef CONFIG_MACH_MSM8X60_EF39S
 static int pm8xxx_tz_get_temp_pm8xxx_adc(struct thermal_zone_device *thermal,
 				      unsigned long *temp)
 {
@@ -290,6 +297,49 @@ static int pm8xxx_tz_get_temp_pm8xxx_adc(struct thermal_zone_device *thermal,
 
 	return 0;
 }
+#else
+static int pm8058_tz_get_temp(struct thermal_zone_device *thermal,
+			      unsigned long *temp)
+{
+	struct pm8xxx_tm_chip *chip = thermal->devdata;
+	DECLARE_COMPLETION_ONSTACK(wait);
+	struct adc_chan_result adc_result = {
+		.physical = 0lu,
+	};
+	int rc;
+
+	if (!chip || !temp)
+		return -EINVAL;
+
+	*temp = chip->temp;
+	
+	rc = adc_channel_request_conv(chip->adc_handle, &wait);
+	if (rc < 0) {
+		pr_err("%s: adc_channel_request_conv() failed, rc = %d\n",
+			__func__, rc);
+		return rc;
+	}
+
+	wait_for_completion(&wait);
+
+	rc = adc_channel_read_result(chip->adc_handle, &adc_result);
+	if (rc < 0) {
+		pr_err("%s: adc_channel_read_result() failed, rc = %d\n",
+			__func__, rc);
+		return rc;
+	}
+
+	*temp = adc_result.physical;
+	chip->temp = adc_result.physical;
+
+//20120718 refer to presto.
+    tzTemp=*temp;
+//	pr_err("%s: +++ pm8058_tz_get_temp %d +++\n",
+//		__func__, (int)tzTemp);
+
+	return 0;
+}
+#endif
 
 static int pm8xxx_tz_get_mode(struct thermal_zone_device *thermal,
 			      enum thermal_device_mode *mode)
@@ -402,7 +452,12 @@ static struct thermal_zone_device_ops pm8xxx_thermal_zone_ops_no_adc = {
 };
 
 static struct thermal_zone_device_ops pm8xxx_thermal_zone_ops_pm8xxx_adc = {
+// jcpark 120629 market 27223 debugging 
+#ifndef CONFIG_MACH_MSM8X60_EF39S
 	.get_temp = pm8xxx_tz_get_temp_pm8xxx_adc,
+#else
+	.get_temp = pm8058_tz_get_temp,
+#endif
 	.get_mode = pm8xxx_tz_get_mode,
 	.set_mode = pm8xxx_tz_set_mode,
 	.get_trip_type = pm8xxx_tz_get_trip_type,
@@ -530,6 +585,26 @@ static int pm8xxx_init_adc(struct pm8xxx_tm_chip *chip, bool enable)
 	return rc;
 }
 
+// paiksun... thermal //pz1946 20111007
+#ifdef CONFIG_SKY_SMB_CHARGER
+#if defined(CONFIG_MACH_MSM8X60_EF39S)
+static struct thermal_zone_device *pm_thermal = NULL;
+
+int pmic8058_tz_get_temp_charging(unsigned long *temp)
+{
+        if(!pm_thermal)
+                return -1;
+        
+// jcpark 120629 market 27223 debugging 
+#ifndef CONFIG_MACH_MSM8X60_EF39S
+        return pm8xxx_tz_get_temp_pm8xxx_adc(pm_thermal, temp);
+#else
+        return pm8058_tz_get_temp(pm_thermal, temp);
+#endif
+}
+#endif
+#endif  /* CONFIG_SKY_SMB_CHARGER */
+
 static int __devinit pm8xxx_tm_probe(struct platform_device *pdev)
 {
 	const struct pm8xxx_tm_core_data *cdata = pdev->dev.platform_data;
@@ -592,6 +667,14 @@ static int __devinit pm8xxx_tm_probe(struct platform_device *pdev)
 		rc = -ENODEV;
 		goto err_fail_adc;
 	}
+
+// paiksun... thermal //pz1946 20111007
+#ifdef CONFIG_SKY_SMB_CHARGER
+#if defined(CONFIG_MACH_MSM8X60_EF39S)
+	if (chip->cdata.adc_type == PM8XXX_TM_ADC_PM8058_ADC) // novapex jcpark 120427 pm8058_tz
+        	pm_thermal = chip->tz_dev;
+#endif
+#endif
 
 	rc = pm8xxx_tm_init_reg(chip);
 	if (rc < 0)

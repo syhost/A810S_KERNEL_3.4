@@ -25,6 +25,9 @@
 #include <mach/qdsp6v2/q6voice.h>
 #include <sound/apr_audio.h>
 #include <sound/q6adm.h>
+#ifdef CONFIG_SKY_SND_EXTAMP  //N1066 20120410 Sound Patch /* elecjang 20110421 for max97001 subsystem */
+#include "sky_snd_ext_amp_max97001.h"
+#endif
 
 #ifndef MAX
 #define  MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -81,6 +84,10 @@ struct audio_copp_topology {
 	int topolog_id[MAX_SESSIONS];
 };
 static struct audio_copp_topology adm_tx_topology_tbl;
+
+#ifdef CONFIG_SKY_CHARGING   //kobj 110513
+extern void msm_charger_set_current_incall(unsigned int in_call);
+#endif
 
 int msm_reset_all_device(void)
 {
@@ -1382,6 +1389,14 @@ void broadcast_event(u32 evt_id, u32 dev_id, u64 session_id)
 		return;
 	mutex_lock(&session_lock);
 
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+        if(evt_id == AUDDEV_EVT_START_VOICE)
+                msm_charger_set_current_incall(true);
+
+        if(evt_id == AUDDEV_EVT_END_VOICE)
+                msm_charger_set_current_incall(false);
+#endif
+
 	if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
 		routing_info.voice_state = dev_id;
 
@@ -1717,6 +1732,9 @@ static int __init audio_dev_ctrl_init(void)
 
 	memset(routing_info.copp_list, COPP_IGNORE,
 		(sizeof(unsigned int) * MAX_SESSIONS * AFE_MAX_PORTS));
+#ifdef CONFIG_SKY_SND_EXTAMP //N1066 20120410 Sound Patch/* elecjang 20110421 for max97001 subsystem */
+	snd_extamp_api_Init();
+#endif
 	return misc_register(&audio_dev_ctrl_misc);
 }
 

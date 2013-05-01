@@ -49,9 +49,26 @@
 #include "mdp.h"
 #include "mdp4.h"
 
+#ifdef CONFIG_SW_RESET
+#include "../../../arch/arm/mach-msm/sky_sys_reset.h"
+#endif
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER)
+#define BATTERY_IMAGE_FILE "/logo2.rle"
+extern int sky_charging_status(void);
+//pz1946 20110920 offline charging
+int offline_charging_status = 0;
+//pz1946 20111002 leakeage current
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER)
+extern void gpio_set_132_trickle_leakeage(void);
+#endif
+#endif
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MSM_FB_NUM	3
 #endif
+#ifdef CONFIG_SW_RESET
+#define REBOOT_IMAGE_FILE "/reboot.rle"
+#endif
+
 
 static unsigned char *fbram;
 static unsigned char *fbram_phys;

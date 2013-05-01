@@ -758,6 +758,10 @@ struct common_data {
 	struct voice_data voice[MAX_VOC_SESSIONS];
 };
 
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+int voice_set_voc_path_full_reset(void);
+#endif
+
 int voice_set_voc_path_full(uint32_t set);
 
 void voice_register_mvs_cb(ul_cb_fn ul_cb,

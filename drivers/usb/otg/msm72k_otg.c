@@ -35,6 +35,10 @@
 #define MSM_USB_BASE	(dev->regs)
 #define USB_LINK_RESET_TIMEOUT	(msecs_to_jiffies(10))
 #define DRIVER_NAME	"msm_otg"
+#ifdef CONFIG_SKY_SMB_CHARGER
+extern int charger_insert_noty_event;
+int otg_power_init_count = 0;
+#endif
 static void otg_reset(struct usb_phy *phy, int phy_reset);
 static void msm_otg_set_vbus_state(int online);
 #ifdef CONFIG_USB_EHCI_MSM_72K
@@ -46,6 +50,9 @@ static void msm_otg_set_id_state(int id)
 #endif
 
 struct msm_otg *the_msm_otg;
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+static  u8 first_call_from_msm_charge = false;
+#endif  //CONFIG_SKY_CHARGING
 
 static int is_host(void)
 {
@@ -536,15 +543,28 @@ static int msm_otg_set_power(struct usb_phy *xceiv, unsigned mA)
 				test_bit(ID_B, &dev->inputs))
 		charge = USB_IDCHG_MAX;
 
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+	pr_info("[SKY CHG]Charging with %dmA current, charge_type %d\n", charge,new_chg);
+#else  //CONFIG_SKY_CHARGING
 	pr_debug("Charging with %dmA current\n", charge);
+#endif  //CONFIG_SKY_CHARGING
 	/* Call vbus_draw only if the charger is of known type and also
 	 * ignore request to stop charging as a result of suspend interrupt
 	 * when wall-charger is used.
 	 */
+//pz1946 20120106 usb tethering sleep current
+#if 1
+ 	if (pdata->chg_vbus_draw && new_chg != USB_CHG_TYPE__INVALID){
+	//pr_info("~~~~pz1946 msm_otg_set_power check\n");
+		if((charger_insert_noty_event == 1 && otg_power_init_count == 0) || charger_insert_noty_event == 0)
+			pdata->chg_vbus_draw(charge);
+		otg_power_init_count++;
+	}
+#else
 	if (pdata->chg_vbus_draw && new_chg != USB_CHG_TYPE__INVALID &&
 		(charge || new_chg != USB_CHG_TYPE__WALLCHARGER))
 			pdata->chg_vbus_draw(charge);
-
+#endif
 	if (new_chg == USB_CHG_TYPE__WALLCHARGER) {
 		wake_lock(&dev->wlock);
 		queue_work(dev->wq, &dev->sm_work);
@@ -1224,6 +1244,10 @@ void msm_otg_set_vbus_state(int online)
 
 	wake_lock(&dev->wlock);
 	queue_work(dev->wq, &dev->sm_work);
+
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+        first_call_from_msm_charge = true;
+#endif  //CONFIG_SKY_CHARGING
 }
 
 static irqreturn_t msm_otg_irq(int irq, void *data)
@@ -1840,6 +1864,14 @@ static void msm_otg_sm_work(struct work_struct *w)
 			msm_otg_put_suspend(dev);
 			/* Allow idle power collapse */
 			otg_pm_qos_update_latency(dev, 0);
+#ifdef CONFIG_SKY_CHARGING  //kobj 110513
+		        pr_debug("[SKY CHG] first_call =%d\n",first_call_from_msm_charge);
+			if(first_call_from_msm_charge)
+			{
+				msm_otg_set_power(&dev->otg, 700/* USB_WALLCHARGER_CHG_CURRENT*/);			// p14682 kobj 110803
+				first_call_from_msm_charge = false;
+			}
+#endif  //CONFIG_SKY_CHARGING
 		}
 		break;
 	case OTG_STATE_B_WAIT_ACON:

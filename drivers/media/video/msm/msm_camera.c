@@ -38,6 +38,11 @@
 #include <mach/cpuidle.h>
 DEFINE_MUTEX(ctrl_cmd_lock);
 
+#ifdef CONFIG_PANTECH_CAMERA
+#define F_PANTECH_CAMERA_FIX_MSM_CTRL_TIMEOUT
+#define F_PANTECH_CAMERA_FIX_MSM_OPEN_FAIL
+#endif
+
 #define CAMERA_STOP_VIDEO 58
 spinlock_t pp_prev_spinlock;
 spinlock_t pp_stereocam_spinlock;
@@ -779,6 +784,11 @@ static int __msm_get_frame(struct msm_sync *sync,
 	frame->fd = pmem_info.fd;
 	frame->path = vdata->phy.output_id;
 	frame->frame_id = vdata->phy.frame_id;
+#ifdef CONFIG_PANTECH_CAMERA//IRQ
+	if (sync->sctrl.s_readirq) {
+		frame->irq_stat = sync->sctrl.s_readirq();
+	}
+#endif
 	CDBG("%s: plane0 %x, plane1 %x, plane2 %x,qcmd %x, virt_addr %x\n",
 		__func__, pphy->p0_phy, pphy->p1_phy, pphy->p2_phy,
 		(int) qcmd, (int) frame->buffer);
@@ -1025,6 +1035,12 @@ static int msm_control(struct msm_control_device *ctrl_pmsm,
 		goto end;
 	}
 	msm_queue_drain(&ctrl_pmsm->ctrl_q, list_control);
+#ifdef F_PANTECH_CAMERA_FIX_MSM_CTRL_TIMEOUT
+	if (udata->timeout_ms > 0)
+		qcmd_resp = __msm_control(sync, &ctrl_pmsm->ctrl_q, qcmd,
+					msecs_to_jiffies(udata->timeout_ms));
+	else
+#endif
 	qcmd_resp = __msm_control(sync,
 				  &ctrl_pmsm->ctrl_q,
 				  qcmd, msecs_to_jiffies(10000));
@@ -3126,6 +3142,12 @@ static int msm_release_control(struct inode *node, struct file *filep)
 		msm_queue_drain(&ctrl_pmsm->ctrl_q, list_control);
 		kfree(ctrl_pmsm);
 	}
+#ifdef F_PANTECH_CAMERA_FIX_MSM_OPEN_FAIL
+	if (!rc) {
+		msm_queue_drain(&pmsm->sync->event_q, list_config);
+		atomic_set(&pmsm->opened, 0);
+	}
+#endif
 	return rc;
 }
 
@@ -3830,8 +3852,20 @@ static int msm_open_common(struct inode *inode, struct file *filep,
 	}
 
 	rc = __msm_open(pmsm, MSM_APPS_ID_PROP, is_controlnode);
+#ifdef F_PANTECH_CAMERA_FIX_MSM_OPEN_FAIL
+	if (rc < 0) {
+		if (is_controlnode) {
+			return rc;
+		} else {
+			filep->private_data = pmsm;
+			msm_release_config(inode, filep);
+			return rc;
+		}
+	}
+#else
 	if (rc < 0)
 		return rc;
+#endif
 	filep->private_data = pmsm;
 	CDBG("%s: rc %d\n", __func__, rc);
 	return rc;

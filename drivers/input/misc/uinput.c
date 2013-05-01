@@ -612,6 +612,115 @@ static int uinput_ff_upload_from_user(const char __user *buffer,
 	__ret;						\
 })
 
+#if 1 // defined (FEATURE_PANTECH_MDS_MTC)|| defined(FEATURE_PANTECH_STABILITY)
+#ifdef CONFIG_COMPAT 
+ 
+#define BITS_PER_LONG_COMPAT (sizeof(compat_long_t) * 8)
+#define BITS_TO_LONGS_COMPAT(x) ((((x) - 1) / BITS_PER_LONG_COMPAT) + 1)
+
+#ifdef __BIG_ENDIAN
+static int bits_to_user(unsigned long *bits, unsigned int maxbit,
+       unsigned int maxlen, void __user *p, int compat)
+{
+   int len, i;
+ 
+   if (compat) {
+     len = BITS_TO_LONGS_COMPAT(maxbit) * sizeof(compat_long_t);
+     if (len > maxlen)
+       len = maxlen;
+ 
+     for (i = 0; i < len / sizeof(compat_long_t); i++)
+       if (copy_to_user((compat_long_t __user *) p + i,
+            (compat_long_t *) bits +
+             i + 1 - ((i % 2) << 1),
+            sizeof(compat_long_t)))
+         return -EFAULT;
+   } else {
+     len = BITS_TO_LONGS(maxbit) * sizeof(long);
+     if (len > maxlen)
+       len = maxlen;
+ 
+     if (copy_to_user(p, bits, len))
+       return -EFAULT;
+   }
+ 
+   return len;
+}
+
+#else
+ static int bits_to_user(unsigned long *bits, unsigned int maxbit,
+      unsigned int maxlen, void __user *p, int compat)
+{
+  int len = compat ?
+      BITS_TO_LONGS_COMPAT(maxbit) * sizeof(compat_long_t) :
+      BITS_TO_LONGS(maxbit) * sizeof(long);
+
+  if (len > maxlen)
+    len = maxlen;
+
+  return copy_to_user(p, bits, len) ? -EFAULT : len;
+}
+#endif /* __BIG_ENDIAN */
+
+#else
+
+static int bits_to_user(unsigned long *bits, unsigned int maxbit,
+      unsigned int maxlen, void __user *p, int compat)
+{
+  int len = BITS_TO_LONGS(maxbit) * sizeof(long);
+
+  if (len > maxlen)
+    len = maxlen;
+
+  return copy_to_user(p, bits, len) ? -EFAULT : len;
+}
+
+#endif /* CONFIG_COMPAT */
+
+static int str_to_user(const char *str, unsigned int maxlen, void __user *p)
+{
+  int len;
+
+  if (!str)
+    return -ENOENT;
+
+  len = strlen(str) + 1;
+  if (len > maxlen)
+    len = maxlen;
+
+  return copy_to_user(p, str, len) ? -EFAULT : len;
+}
+
+
+#define OLD_KEY_MAX 0x1ff
+static int handle_eviocgbit(struct input_dev *dev, unsigned int cmd, void __user *p, int compat_mode) 
+{
+  unsigned long *bits;
+  int len;
+
+  switch (_IOC_NR(cmd) & EV_MAX) {
+   case      0: bits = dev->evbit;  len = EV_MAX;  break;
+   case EV_KEY: bits = dev->keybit; len = KEY_MAX; break;
+   case EV_REL: bits = dev->relbit; len = REL_MAX; break;
+   case EV_ABS: bits = dev->absbit; len = ABS_MAX; break;
+   case EV_MSC: bits = dev->mscbit; len = MSC_MAX; break;
+   case EV_LED: bits = dev->ledbit; len = LED_MAX; break;
+   case EV_SND: bits = dev->sndbit; len = SND_MAX; break;
+   case EV_FF:  bits = dev->ffbit;  len = FF_MAX;  break;
+   case EV_SW:  bits = dev->swbit;  len = SW_MAX;  break;
+   default: return -EINVAL;
+  }
+ 
+  if ((_IOC_NR(cmd) & EV_MAX) == EV_KEY && _IOC_SIZE(cmd) == OLD_KEY_MAX) {
+     len = OLD_KEY_MAX;
+  }
+ 
+   return bits_to_user(bits, len, _IOC_SIZE(cmd), p, compat_mode);
+}
+#undef OLD_KEY_MAX
+
+#endif/*FEATURE_PANTECH_MDS_MTC || FEATURE_PANTECH_STABILITY*/
+
 static long uinput_ioctl_handler(struct file *file, unsigned int cmd,
 				 unsigned long arg, void __user *p)
 {
@@ -640,6 +749,20 @@ static long uinput_ioctl_handler(struct file *file, unsigned int cmd,
 		case UI_DEV_DESTROY:
 			uinput_destroy_device(udev);
 			break;
+#if 1 //defined (FEATURE_PANTECH_MDS_MTC) || defined(FEATURE_PANTECH_STABILITY)
+   case EVIOCGVERSION: 
+		 if (udev->state != UIST_CREATED) 
+			retval = -ENODEV;	
+		 else put_user(EV_VERSION, (int __user *)p);
+		  break;
+			
+	 case EVIOCGID:
+		 if (udev->state != UIST_CREATED) 
+			retval = -ENODEV;	
+	   else if (copy_to_user(p, &udev->dev->id, sizeof(struct input_id)))
+			retval = -EFAULT;
+			break; 
+#endif/*FEATURE_PANTECH_MDS_MTC || FEATURE_PANTECH_STABILITY*/	 
 
 		case UI_SET_EVBIT:
 			retval = uinput_set_bit(arg, evbit, EV_MAX);
@@ -772,7 +895,70 @@ static long uinput_ioctl_handler(struct file *file, unsigned int cmd,
 			break;
 
 		default:
+#if 1 //defined (FEATURE_PANTECH_MDS_MTC) || defined(FEATURE_PANTECH_STABILITY)
+		{
+			 if (udev->state != UIST_CREATED){ 
+				retval = -ENODEV;	
+				break;
+			 }
+
+			 if (_IOC_DIR(cmd) == _IOC_READ) { 
+				
+				if ((_IOC_NR(cmd) & ~EV_MAX) == _IOC_NR(EVIOCGBIT(0, 0)))
+				  handle_eviocgbit(udev->dev, cmd, p, 0);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGKEY(0)))
+				  bits_to_user(udev->dev->key, KEY_MAX, _IOC_SIZE(cmd),
+				              p, 0);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGLED(0)))
+				  bits_to_user(udev->dev->led, LED_MAX, _IOC_SIZE(cmd),
+				              p, 0);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGSND(0)))
+				  bits_to_user(udev->dev->snd, SND_MAX, _IOC_SIZE(cmd),
+				              p, 0);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGSW(0)))
+				  bits_to_user(udev->dev->sw, SW_MAX, _IOC_SIZE(cmd),
+				              p, 0);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGNAME(0)))
+				  str_to_user(udev->dev->name, _IOC_SIZE(cmd), p);
+
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGPHYS(0)))
+				  str_to_user(udev->dev->phys, _IOC_SIZE(cmd), p);
+				
+				if (_IOC_NR(cmd) == _IOC_NR(EVIOCGUNIQ(0)))
+				  str_to_user(udev->dev->uniq, _IOC_SIZE(cmd), p);
+				
+				if ((_IOC_NR(cmd) & ~ABS_MAX) == _IOC_NR(EVIOCGABS(0))) {
+			      int t;
+			      struct input_absinfo abs;
+
+			      t = _IOC_NR(cmd) & ABS_MAX;
+						abs.value = input_abs_get_val(udev->dev,t);
+						abs.minimum = input_abs_get_min(udev->dev,t);
+				    abs.maximum = input_abs_get_max(udev->dev,t);
+				    abs.fuzz = input_abs_get_fuzz(udev->dev,t);
+				    abs.flat = input_abs_get_flat(udev->dev,t);
+				/*
+			      abs.value = udev->dev->abs[t];
+				    abs.minimum = udev->dev->absmin[t];
+				    abs.maximum = udev->dev->absmax[t];
+				    abs.fuzz = udev->dev->absfuzz[t];
+				    abs.flat = udev->dev->absflat[t];
+
+				*/
+						if (copy_to_user(p, &abs, sizeof(struct input_absinfo)))
+						 retval= -EFAULT;
+				  }
+
+			}
+		}
+#else
 			retval = -EINVAL;
+#endif/*FEATURE_PANTECH_MDS_MTC || FEATURE_PANTECH_STABILITY*/
 	}
 
  out:
@@ -814,14 +1000,28 @@ static struct miscdevice uinput_misc = {
 MODULE_ALIAS_MISCDEV(UINPUT_MINOR);
 MODULE_ALIAS("devname:" UINPUT_NAME);
 
+#if 1//defined (FEATURE_PANTECH_MDS_MTC)
+static struct miscdevice uinput_mtc_misc = {
+	.fops		= &uinput_fops,
+	.minor		= UINPUT_MINOR + 1,
+	.name		= "uinput_mtc",//UINPUT_NAME,
+};
+#endif
 static int __init uinput_init(void)
 {
+  int err;
+  printk("\n\nuinput_init start~!! \n");
+  err=misc_register(&uinput_mtc_misc);
+  printk(" \n************uinput_init return value => %d\n",err); 
 	return misc_register(&uinput_misc);
 }
 
 static void __exit uinput_exit(void)
 {
 	misc_deregister(&uinput_misc);
+#if 1 //defined (FEATURE_PANTECH_MDS_MTC)
+	misc_deregister(&uinput_mtc_misc);
+#endif
 }
 
 MODULE_AUTHOR("Aristeu Sergio Rozanski Filho");

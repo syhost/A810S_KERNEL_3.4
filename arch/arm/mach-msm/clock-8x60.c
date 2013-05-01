@@ -3544,13 +3544,25 @@ static struct clk_lookup msm_clocks_8x60[] = {
 	CLK_LOOKUP("core_clk",		gsbi2_qup_clk.c,	""),
 	CLK_LOOKUP("core_clk",		gsbi3_qup_clk.c,	"qup_i2c.0"),
 	CLK_LOOKUP("core_clk",		gsbi4_qup_clk.c,	"qup_i2c.1"),
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+        CLK_LOOKUP("core_clk",         gsbi5_qup_clk.c, "qup_i2c.33"),
+#else
 	CLK_LOOKUP("core_clk",		gsbi5_qup_clk.c,	""),
+#endif
 	CLK_LOOKUP("core_clk",		gsbi6_qup_clk.c,	""),
 	CLK_LOOKUP("core_clk",		gsbi7_qup_clk.c,	"qup_i2c.4"),
 	CLK_LOOKUP("core_clk",		gsbi8_qup_clk.c,	"qup_i2c.3"),
 	CLK_LOOKUP("core_clk",		gsbi9_qup_clk.c,	"qup_i2c.2"),
+#if defined(CONFIG_PN544)
+	CLK_LOOKUP("core_clk",		gsbi10_qup_clk.c,	"qup_i2c.21"),
+#else	
 	CLK_LOOKUP("core_clk",		gsbi10_qup_clk.c,	"spi_qsd.1"),
+#endif
+#ifdef CONFIG_SKY_BATTERY_MAX17040
+	CLK_LOOKUP("core_clk",		gsbi11_qup_clk.c,	"qup_i2c.16"),
+#else
 	CLK_LOOKUP("core_clk",		gsbi11_qup_clk.c,	""),
+#endif
 	CLK_LOOKUP("gsbi_qup_clk",	gsbi12_qup_clk.c,	"msm_dsps"),
 	CLK_LOOKUP("core_clk",		gsbi12_qup_clk.c,	"qup_i2c.5"),
 	CLK_LOOKUP("core_clk",		pdm_clk.c,		""),
@@ -3579,14 +3591,26 @@ static struct clk_lookup msm_clocks_8x60[] = {
 	CLK_LOOKUP("iface_clk",		gsbi3_p_clk.c, "msm_serial_hsl.2"),
 	CLK_LOOKUP("iface_clk",		gsbi3_p_clk.c,		"qup_i2c.0"),
 	CLK_LOOKUP("iface_clk",		gsbi4_p_clk.c,		"qup_i2c.1"),
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+        CLK_LOOKUP("iface_clk",     gsbi5_p_clk.c,      "qup_i2c.33"),
+#else
 	CLK_LOOKUP("iface_clk",		gsbi5_p_clk.c,		""),
+#endif
 	CLK_LOOKUP("iface_clk",		gsbi6_p_clk.c, "msm_serial_hs.0"),
 	CLK_LOOKUP("iface_clk",		gsbi7_p_clk.c,		"qup_i2c.4"),
 	CLK_LOOKUP("iface_clk",		gsbi8_p_clk.c,		"qup_i2c.3"),
 	CLK_LOOKUP("iface_clk",		gsbi9_p_clk.c, "msm_serial_hsl.1"),
 	CLK_LOOKUP("iface_clk",		gsbi9_p_clk.c,		"qup_i2c.2"),
+#if defined(CONFIG_PN544)
+	CLK_LOOKUP("iface_clk",		gsbi10_p_clk.c,		"qup_i2c.21"),
+#else	
 	CLK_LOOKUP("iface_clk",		gsbi10_p_clk.c,		"spi_qsd.1"),
+#endif	
+#ifdef CONFIG_SKY_BATTERY_MAX17040 //ps2 team shs : porting fuel gauge
+	CLK_LOOKUP("iface_clk",		gsbi11_p_clk.c,		"qup_i2c.16"),
+#else
 	CLK_LOOKUP("iface_clk",		gsbi11_p_clk.c,		""),
+#endif
 	CLK_LOOKUP("iface_clk",		gsbi12_p_clk.c,		""),
 	CLK_LOOKUP("iface_clk",		gsbi12_p_clk.c, "msm_serial_hsl.0"),
 	CLK_LOOKUP("iface_clk",		gsbi12_p_clk.c,		"qup_i2c.5"),
@@ -3615,7 +3639,12 @@ static struct clk_lookup msm_clocks_8x60[] = {
 	CLK_LOOKUP("mem_clk",		rpm_msg_ram_p_clk.c,	""),
 	CLK_LOOKUP("cam_clk",		cam_clk.c,		NULL),
 	CLK_LOOKUP("csi_clk",		csi0_clk.c,		NULL),
-	CLK_LOOKUP("csi_clk",		csi1_clk.c, "msm_camera_ov7692.0"),
+#ifdef CONFIG_PANTECH_CAMERA_S5K6AAFX13
+	CLK_LOOKUP("csi_clk",		csi1_clk.c, "msm_camera_s5k6aafx13.0"),
+#endif
+#ifdef CONFIG_PANTECH_CAMERA_MT9D113
+	CLK_LOOKUP("csi_clk",		csi1_clk.c, "msm_camera_mt9d113.0"),
+#endif
 	CLK_LOOKUP("csi_clk",		csi1_clk.c, "msm_camera_ov9726.0"),
 	CLK_LOOKUP("csi_clk",		csi1_clk.c, "msm_csic.1"),
 	CLK_LOOKUP("csi_src_clk",	csi_src_clk.c,		NULL),
@@ -3653,7 +3682,12 @@ static struct clk_lookup msm_clocks_8x60[] = {
 	CLK_LOOKUP("vpe_clk",		vpe_clk.c,		NULL),
 	CLK_LOOKUP("core_clk",		vpe_clk.c,	"footswitch-8x60.9"),
 	CLK_LOOKUP("csi_vfe_clk",	csi0_vfe_clk.c,		NULL),
-	CLK_LOOKUP("csi_vfe_clk",	csi1_vfe_clk.c, "msm_camera_ov7692.0"),
+#ifdef CONFIG_PANTECH_CAMERA_S5K6AAFX13
+	CLK_LOOKUP("csi_vfe_clk",	csi1_vfe_clk.c, "msm_camera_s5k6aafx13.0"),
+#endif
+#ifdef CONFIG_PANTECH_CAMERA_MT9D113
+	CLK_LOOKUP("csi_vfe_clk",		csi1_vfe_clk.c, "msm_camera_mt9d113.0"),
+#endif
 	CLK_LOOKUP("csi_vfe_clk",	csi1_vfe_clk.c, "msm_camera_ov9726.0"),
 	CLK_LOOKUP("csi_vfe_clk",	csi1_vfe_clk.c, "msm_csic.1"),
 	CLK_LOOKUP("vfe_clk",		vfe_clk.c,		NULL),
@@ -3667,7 +3701,12 @@ static struct clk_lookup msm_clocks_8x60[] = {
 	CLK_LOOKUP("bus_clk",		vpe_axi_clk.c,	 "footswitch-8x60.9"),
 	CLK_LOOKUP("arb_clk",		amp_p_clk.c,		"mipi_dsi.1"),
 	CLK_LOOKUP("csi_pclk",		csi0_p_clk.c,		NULL),
-	CLK_LOOKUP("csi_pclk",		csi1_p_clk.c, "msm_camera_ov7692.0"),
+#ifdef CONFIG_PANTECH_CAMERA_S5K6AAFX13
+	CLK_LOOKUP("csi_pclk",		csi1_p_clk.c, "msm_camera_s5k6aafx13.0"),
+#endif	
+#ifdef CONFIG_PANTECH_CAMERA_MT9D113
+	CLK_LOOKUP("csi_pclk",		csi1_p_clk.c, "msm_camera_mt9d113.0"),
+#endif
 	CLK_LOOKUP("csi_pclk",		csi1_p_clk.c, "msm_camera_ov9726.0"),
 	CLK_LOOKUP("csi_pclk",		csi1_p_clk.c,		"msm_csic.1"),
 	CLK_LOOKUP("master_iface_clk",	dsi_m_p_clk.c,		"mipi_dsi.1"),

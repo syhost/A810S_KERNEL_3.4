@@ -24,6 +24,17 @@
 #include <linux/power_supply.h>
 #include <linux/msm-charger.h>
 
+//pz1946 20111108 car-charger usb-detect
+#include <linux/usb/composite.h>
+#ifdef CONFIG_SKY_SMB_CHARGER
+int charger_insert_noty_event = 0;
+int smb_charger_state = 0;
+extern int charging_stop_control;
+extern int pm8058_is_factory_cable(void);
+//pz1946 20120106 tethering sleep current
+extern int otg_power_init_count;
+#endif
+
 #define SMB137B_MASK(BITS, POS)  ((unsigned char)(((1 << BITS) - 1) << POS))
 
 #define CHG_CURRENT_REG		0x00
@@ -182,7 +193,11 @@
 #define COMMAND_B_REG	0x3C
 #define	THERM_NTC_CURR_VERRIDE		BIT(7)
 
-#define SMB137B_CHG_PERIOD	((HZ) * 150)
+//pz1946 20111108 carkit-charger
+//#define SMB137B_CHG_PERIOD	((HZ) * 150)
+#define SMB137B_CHG_PERIOD	((HZ) * 29)
+//pz1946 20120106 usb detect time
+#define SMB137B_START_CHG_PERIOD	((HZ) * 59)
 
 #define INPUT_CURRENT_REG_DEFAULT	0xE1
 #define INPUT_CURRENT_REG_MIN		0x01
@@ -218,12 +233,19 @@ struct smb137b_data {
 
 	u8 dev_id_reg;
 	struct msm_hardware_charger adapter_hw_chg;
+//pz1946 20111108 compensation charging
+#if 0
+	int stop_smb_setting_complete;
+#endif
+	int car_charger_compare;
+//pz1946 20120206 TDMB channeld scan fail reset debug
+	int aicl_off_complete;
+	int charging_stop_setting;
+	int smb_schedule_count;
+	int charger_plug_count;
 };
 
 static unsigned int disabled;
-static DEFINE_MUTEX(init_lock);
-static unsigned int init_otg_power;
-
 enum charger_stat {
 	SMB137B_ABSENT,
 	SMB137B_PRESENT,
@@ -276,7 +298,121 @@ static ssize_t id_reg_show(struct device *dev, struct device_attribute *attr,
 
 	return sprintf(buf, "%02x\n", smb137b_chg->dev_id_reg);
 }
+
+#ifdef CONFIG_SKY_SMB_CHARGER
+static ssize_t status_b_reg_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	int ret;
+	u8 temp;
+	struct smb137b_data *smb137b_chg;
+
+	smb137b_chg = i2c_get_clientdata(to_i2c_client(dev));
+
+	ret = smb137b_read_reg(smb137b_chg->client, STATUS_B_REG, &temp);
+
+	return sprintf(buf, "%s\n", (temp & USB51_HC_MODE_STAT) ? "HC mode" : "USB 5/1 mode");
+}
+
+static ssize_t status_c_reg_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	int ret;
+	u8 temp;
+	struct smb137b_data *smb137b_chg;
+
+	smb137b_chg = i2c_get_clientdata(to_i2c_client(dev));
+
+	ret = smb137b_read_reg(smb137b_chg->client, STATUS_C_REG, &temp);
+
+        temp = ((temp & AUTO_IN_CURR_LIMIT_MASK) >> 4);
+
+        if(temp == 0)
+        	return sprintf(buf, "%s\n", "700mA");
+        else if(temp == 1)
+        	return sprintf(buf, "%s\n", "800mA");
+        else if(temp == 2)
+        	return sprintf(buf, "%s\n", "900mA");
+        else if(temp == 3)
+        	return sprintf(buf, "%s\n", "1000mA");
+        else if(temp == 4)
+        	return sprintf(buf, "%s\n", "1100mA");
+        else if(temp == 5)
+        	return sprintf(buf, "%s\n", "1200mA");
+        else if(temp == 6)
+        	return sprintf(buf, "%s\n", "1300mA");
+        else if(temp == 7)
+        	return sprintf(buf, "%s\n", "1400mA");
+        else if(temp == 14)
+        	return sprintf(buf, "%s\n", "275mA");
+        else if(temp == 15)
+        	return sprintf(buf, "%s\n", "500mA");
+        else
+        	return sprintf(buf, "%s\n", "ERROR");
+
+}
+
+static ssize_t status_e_reg_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	int ret;
+	u8 temp;
+	struct smb137b_data *smb137b_chg;
+
+	smb137b_chg = i2c_get_clientdata(to_i2c_client(dev));
+
+	ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &temp);
+
+        temp = ((temp & CHARGING_STAT_E) >> 1);
+
+        if(temp == 0)
+        	return sprintf(buf, "%s\n", "Not Charging");
+        else if(temp == 1)
+        	return sprintf(buf, "%s\n", "Pre Charging");
+        else if(temp == 2)
+        	return sprintf(buf, "%s\n", "Fast Charging");
+        else if(temp == 3)
+        	return sprintf(buf, "%s\n", "Taper Charging");
+        else
+        	return sprintf(buf, "%s\n", "ERROR");
+        
+}
+
+static ssize_t status_f_reg_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	int ret;
+	u8 temp;
+	struct smb137b_data *smb137b_chg;
+
+	smb137b_chg = i2c_get_clientdata(to_i2c_client(dev));
+
+	ret = smb137b_read_reg(smb137b_chg->client, STATUS_F_REG, &temp);
+
+	return sprintf(buf, "%s\n", (temp & BATT_LOW_STAT) ? "AUXPWR < 2.1V" : "AUXPWR > 2.1V");
+}
+#endif
+
 static DEVICE_ATTR(id_reg, S_IRUGO | S_IWUSR, id_reg_show, NULL);
+#ifdef CONFIG_SKY_SMB_CHARGER
+static DEVICE_ATTR(status_b_reg, S_IRUGO | S_IWUSR, status_b_reg_show, NULL);
+static DEVICE_ATTR(status_c_reg, S_IRUGO | S_IWUSR, status_c_reg_show, NULL);
+static DEVICE_ATTR(status_e_reg, S_IRUGO | S_IWUSR, status_e_reg_show, NULL);
+static DEVICE_ATTR(status_f_reg, S_IRUGO | S_IWUSR, status_f_reg_show, NULL);
+
+static struct attribute *smb137b_attrs[] = {
+	&dev_attr_status_b_reg.attr,
+	&dev_attr_status_c_reg.attr,
+	&dev_attr_status_e_reg.attr,
+	&dev_attr_status_f_reg.attr,
+	NULL
+};
+
+static const struct attribute_group smb137b_sysfs_files = {
+	.name	= "smb137b_status",
+	.attrs	= smb137b_attrs,
+};
+#endif
 
 #ifdef DEBUG
 static void smb137b_dbg_print_status_regs(struct smb137b_data *smb137b_chg)
@@ -313,6 +449,7 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 	int cmd_val = COMMAND_A_REG_DEFAULT;
 	u8 temp = 0;
 	int ret = 0;
+
 	struct smb137b_data *smb137b_chg;
 
 	smb137b_chg = container_of(hw_chg, struct smb137b_data, adapter_hw_chg);
@@ -329,14 +466,42 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 			 "%s charge with same current %d called again\n",
 			  __func__, chg_current);
 
+#ifdef CONFIG_SKY_SMB_CHARGER
+	//dev_info(&smb137b_chg->client->dev, "[~~~pz1946~~~~]%s, chg_current = %d\n", __func__, chg_current);
+#else
 	dev_dbg(&smb137b_chg->client->dev, "%s\n", __func__);
-	if (chg_current < 500)
+#endif
+//pz1946 20110902 usb ac display
+#ifdef CONFIG_SKY_SMB_CHARGER
+	if (chg_current < 500) {
 		cmd_val &= ~USBIN_MODE_500_BIT;
-	else if (chg_current == 500)
+		smb_charger_state = CHG_TYPE_NONE;
+	}
+	else if (chg_current == 500) {
 		cmd_val |= USBIN_MODE_500_BIT;
-	else
+		smb_charger_state = CHG_TYPE_USB;
+	}
+	else {	
 		cmd_val |= USBIN_MODE_HCMODE_BIT;
+		smb_charger_state = CHG_TYPE_AC;
+	}
 
+//#ifdef CONFIG_SKY_SMB_CHARGER
+        if(pm8058_is_factory_cable()) {
+		cmd_val |= USBIN_MODE_HCMODE_BIT;
+		smb_charger_state = CHG_TYPE_FACTORY;
+	}
+#endif
+
+#if 1
+//pz1946 20111122 AICL change
+	smb137b_chg->car_charger_compare = 0;
+//pz1946 20120106 init compensation check
+	cmd_val &= ~BATT_CHG_EN_BIT; 
+//pz1946 20120106 position change
+	charging_stop_control = 0;
+	smb137b_chg->charging_stop_setting = 0;
+#endif
 	smb137b_chg->chgcurrent = chg_current;
 	smb137b_chg->cur_charging_mode = cmd_val;
 
@@ -346,6 +511,7 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 	 * Otherwise default 100mA mode might cause VOUTL drop and fail
 	 * the system in case of dead battery.
 	 */
+
 	ret = smb137b_write_reg(smb137b_chg->client,
 					COMMAND_A_REG, cmd_val);
 	if (ret) {
@@ -353,6 +519,8 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 			"%s couldn't write to command_reg\n", __func__);
 		goto out;
 	}
+//pz1946 20111230 position chnage
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
 	ret = smb137b_write_reg(smb137b_chg->client,
 					PIN_CTRL_REG, PIN_CTRL_REG_DEFAULT);
 	if (ret) {
@@ -360,6 +528,24 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 			"%s couldn't write to pin ctrl reg\n", __func__);
 		goto out;
 	}
+#endif
+//pz1946 20111122 AICL MAX CURRENT 1000mA setting
+	ret = smb137b_write_reg(smb137b_chg->client, INPUT_CURRENT_LIMIT_REG, 0x60);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't write to max current reg\n", __func__);
+                goto out;
+        }
+//pz1946 36hr dischager status
+#if 0 //pz1946 lk setting auto reload off
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      SAFETY_TIMER_THERMAL_SHUTDOWN_REG, 0x4F); 
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't write to safty timer thermal shutdown\n", __func__);
+                goto out;
+	}
+#endif
 	smb137b_chg->charging = true;
 	smb137b_chg->batt_status = POWER_SUPPLY_STATUS_CHARGING;
 	smb137b_chg->batt_chg_type = POWER_SUPPLY_CHARGE_TYPE_TRICKLE;
@@ -375,12 +561,154 @@ static int smb137b_start_charging(struct msm_hardware_charger *hw_chg,
 			smb137b_dbg_print_status_regs(smb137b_chg);
 		}
 		if (((temp & CHARGING_STAT_E) >> 1) >= FAST_CHG_E_STATUS)
+#ifdef CONFIG_SKY_SMB_CHARGER
+        {      
+#endif
 			smb137b_chg->batt_chg_type
 						= POWER_SUPPLY_CHARGE_TYPE_FAST;
+#ifdef CONFIG_SKY_SMB_CHARGER
+			msm_charger_notify_event(
+				&smb137b_chg->adapter_hw_chg,
+				CHG_BATT_BEGIN_FAST_CHARGING);
+        }
+#endif
 	}
 	/*schedule charge_work to keep track of battery charging state*/
-	schedule_delayed_work(&smb137b_chg->charge_work, SMB137B_CHG_PERIOD);
+//pz1946 20120106 smb register value read test code
+#if 0
+      ret = smb137b_read_reg(smb137b_chg->client, CHG_CURRENT_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                CHG_CURRENT_REG, temp);
 
+        ret = smb137b_read_reg(smb137b_chg->client, INPUT_CURRENT_LIMIT_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                INPUT_CURRENT_LIMIT_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, FLOAT_VOLTAGE_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                FLOAT_VOLTAGE_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CONTROL_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                CONTROL_A_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CONTROL_B_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                CONTROL_B_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, PIN_CTRL_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                PIN_CTRL_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, OTG_LBR_CTRL_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                OTG_LBR_CTRL_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, FAULT_INTR_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                FAULT_INTR_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CELL_TEMP_MON_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                CELL_TEMP_MON_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, SAFETY_TIMER_THERMAL_SHUTDOWN_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                SAFETY_TIMER_THERMAL_SHUTDOWN_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, VSYS_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                VSYS_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, 0x0B, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                0x0B, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, COMMAND_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                COMMAND_A_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_A_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_B_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_B_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_C_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_C_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_D_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_D_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_E_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_F_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_F_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_G_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_G_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_H_REG, &temp);
+        if (ret == 0)
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%d = 0x%x \n", __func__,
+                STATUS_H_REG, temp);
+#endif /*pz1946 20111230 test code */
+
+#if 1
+//pz1946 20120106 usb detect time 
+	schedule_delayed_work(&smb137b_chg->charge_work, SMB137B_START_CHG_PERIOD);
+#else
+	schedule_delayed_work(&smb137b_chg->charge_work, SMB137B_CHG_PERIOD);
+#endif
 out:
 	return ret;
 }
@@ -391,15 +719,26 @@ static int smb137b_stop_charging(struct msm_hardware_charger *hw_chg)
 	struct smb137b_data *smb137b_chg;
 
 	smb137b_chg = container_of(hw_chg, struct smb137b_data, adapter_hw_chg);
+//pz1946 20120106 tethering sleep current
+	otg_power_init_count = 0;
 
 	dev_dbg(&smb137b_chg->client->dev, "%s\n", __func__);
 	if (smb137b_chg->charging == false)
 		return 0;
-
+//pz1946 20120106 remove
+#if 0
 	smb137b_chg->charging = false;
 	smb137b_chg->batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
 	smb137b_chg->batt_chg_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
-
+//pz1946 20110919 charger interrupt state change
+#ifdef CONFIG_SKY_SMB_CHARGER
+	smb_charger_state = CHG_TYPE_NONE;
+	smb137b_chg->car_charger_compare = 0;
+#endif //Do not use at PRESTO
+#endif /* pz1946 20120106 remove */
+	//pr_info("~~~~~pz1946~~~~~ stopping time check\n");
+//pz1946 20110907 interrupt pin change
+#if 0 //because if charger is unpluged then charger IC reset 
 	ret = smb137b_write_reg(smb137b_chg->client, COMMAND_A_REG,
 				smb137b_chg->cur_charging_mode);
 	if (ret) {
@@ -415,6 +754,7 @@ static int smb137b_stop_charging(struct msm_hardware_charger *hw_chg)
 			"%s couldn't write to pin ctrl reg\n", __func__);
 
 out:
+#endif
 	return ret;
 }
 
@@ -424,6 +764,7 @@ static int smb137b_charger_switch(struct msm_hardware_charger *hw_chg)
 
 	smb137b_chg = container_of(hw_chg, struct smb137b_data, adapter_hw_chg);
 	dev_dbg(&smb137b_chg->client->dev, "%s\n", __func__);
+	//pr_info("~~~~~pz1946~~~~~ switch time check\n");
 	return 0;
 }
 
@@ -435,10 +776,16 @@ static irqreturn_t smb137b_valid_handler(int irq, void *dev_id)
 
 	smb137b_chg = i2c_get_clientdata(client);
 
-	pr_debug("%s Cable Detected USB inserted\n", __func__);
+	//pr_debug("%s Cable Detected USB inserted\n", __func__);
 	/*extra delay needed to allow CABLE_DET_N settling down and debounce
 	 before	trying to sample its correct value*/
+#ifdef CONFIG_SKY_SMB_CHARGER
+//pz1946 20111114 wake timing control
+        //msleep(300);
+        udelay(100);
+#else
 	usleep_range(1000, 1200);
+#endif
 	val = gpio_get_value_cansleep(smb137b_chg->valid_n_gpio);
 	if (val < 0) {
 		dev_err(&smb137b_chg->client->dev,
@@ -446,21 +793,70 @@ static irqreturn_t smb137b_valid_handler(int irq, void *dev_id)
 			smb137b_chg->valid_n_gpio, val);
 		goto err;
 	}
+#ifdef CONFIG_SKY_SMB_CHARGER
+	//dev_info(&smb137b_chg->client->dev, "[SKY CHG]%s: gpio =%d, val=%d\n", __func__, smb137b_chg->valid_n_gpio, val);
+#else
 	dev_dbg(&smb137b_chg->client->dev, "%s val=%d\n", __func__, val);
+#endif
 
-	if (val) {
+//pz1946 20120106 
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
+//pz1946 20111223 charger interrupt
+//pr_info("~~~~pz1946 charger_plug_count = %d \n", smb137b_chg->charger_plug_count); 
+	if (smb137b_chg->charger_plug_count == 1) {
 		if (smb137b_chg->usb_status != SMB137B_ABSENT) {
 			smb137b_chg->usb_status = SMB137B_ABSENT;
-			msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
-					CHG_REMOVED_EVENT);
+//pz1946 20111111 chager remove time
+			smb_charger_state = CHG_TYPE_NONE;
+//pz1946 20111223 charger interrupt 
+			smb137b_chg->charger_plug_count = 0;
+			smb137b_chg->aicl_off_complete = 0;
+//pz1946 20111223 usb tethering sleep current
+			charger_insert_noty_event = 0;
+			smb137b_chg->charging = false;
+			smb137b_chg->batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
+			smb137b_chg->batt_chg_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
+			smb137b_chg->car_charger_compare = 0;
+			smb137b_chg->smb_schedule_count = 0;
+
+			cancel_delayed_work_sync(&smb137b_chg->charge_work);
+			msm_charger_notify_event(&smb137b_chg->adapter_hw_chg, CHG_REMOVED_EVENT);
 		}
 	} else {
 		if (smb137b_chg->usb_status == SMB137B_ABSENT) {
 			smb137b_chg->usb_status = SMB137B_PRESENT;
-			msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
-					CHG_INSERTED_EVENT);
+//pz1946 2011111 charger connection time
+			smb_charger_state = CHG_TYPE_USB;
+//pz1946 20111223 charger interrupt
+			smb137b_chg->charger_plug_count = 1;
+
+//pz1946 20111223 usb tethering sleep current
+			charger_insert_noty_event = 1;
+//pz1946 20120103 test
+			otg_power_init_count = 0;
+			msm_charger_notify_event(&smb137b_chg->adapter_hw_chg, CHG_INSERTED_EVENT);
 		}
 	}
+#else
+		if (val) {
+			if (smb137b_chg->usb_status != SMB137B_ABSENT) {
+				smb137b_chg->usb_status = SMB137B_ABSENT;
+//pz1946 20111111 chager remove time
+				smb_charger_state = CHG_TYPE_NONE;
+				msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
+					CHG_REMOVED_EVENT);
+			}
+		} else {
+			if (smb137b_chg->usb_status == SMB137B_ABSENT) {
+				smb137b_chg->usb_status = SMB137B_PRESENT;
+//pz1946 2011111 charger connection time
+				smb_charger_state = CHG_TYPE_USB;
+				msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
+					CHG_INSERTED_EVENT);
+			}
+		}
+#endif
+
 err:
 	return IRQ_HANDLED;
 }
@@ -523,7 +919,11 @@ static void smb137b_charge_sm(struct work_struct *smb137b_work)
 	int ret;
 	struct smb137b_data *smb137b_chg;
 	u8 temp = 0;
+	u8 charging_check = 0;
 	int notify_batt_changed = 0;
+#ifdef CONFIG_SKY_SMB_CHARGER
+    char buf[16];
+#endif
 
 	smb137b_chg = container_of(smb137b_work, struct smb137b_data,
 			charge_work.work);
@@ -583,54 +983,413 @@ static void smb137b_charge_sm(struct work_struct *smb137b_work)
 			}
 		}
 	}
+#ifdef CONFIG_SKY_SMB_CHARGER
+	ret = smb137b_read_reg(smb137b_chg->client,
+					STATUS_E_REG, &charging_check);
+        if(ret)
+                charging_check = 0;
+        else
+                charging_check = ((charging_check & CHARGING_STAT_E) >> 1);
 
+        if(charging_check == 0)
+        	sprintf(buf, "%s\n", "Not Charging");
+        else if(charging_check == 1)
+        	sprintf(buf, "%s\n", "Pre Charging");
+        else if(charging_check == 2)
+        	sprintf(buf, "%s\n", "Fast Charging");
+        else if(charging_check == 3)
+        	sprintf(buf, "%s\n", "Taper Charging");
+        else
+        	sprintf(buf, "%s\n", "ERROR");
+
+	//dev_info(&smb137b_chg->client->dev, "[~~~~pz1946~~~~]%s, chg_type=%d, chg_status=%s\n", __func__,smb137b_chg->batt_chg_type, buf);
+#endif
+
+#if 1
+//pz1946 20111108 carkit-charging-support 
+        //pr_info("~~~~~pz1946~~~~~ charge_sm time check\n");
+        if(smb137b_chg->car_charger_compare == 0 && smb_charger_state == CHG_TYPE_USB) {
+        //pr_info("~~~~~pz1946~~~~~ charge_sm_carkit_time check\n");
+                if(composite_get_udc_state()) {
+                        smb_charger_state = CHG_TYPE_USB;
+                        smb137b_chg->car_charger_compare = 1;
+                }
+                else {
+                        smb137b_chg->cur_charging_mode |= USBIN_MODE_HCMODE_BIT;
+                        smb_charger_state = CHG_TYPE_AC;
+                        smb137b_chg->car_charger_compare = 2;
+
+      			ret = smb137b_write_reg(smb137b_chg->client, COMMAND_A_REG, smb137b_chg->cur_charging_mode);
+       			if (ret) {
+               			dev_err(&smb137b_chg->client->dev, "%s couldn't write to command_reg\n", __func__);
+       			}
+                }
+        }
+#else
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_B_REG, charger_check);
+	charger_check = charger_check & USB_PIN_STAT;
+	pr_info("~~~~pz1946~~~~ status_b_register temp = %d\n",charger_check);
+
+	if (charging_check == 0 && charger_check = 1)
+	{
+               if (smb137b_chg->usb_status != SMB137B_ABSENT) {
+                        smb137b_chg->usb_status = SMB137B_ABSENT;
+                        msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
+                        CHG_REMOVED_EVENT);
+               }
+	}
+
+	if(charging_stop_control == 1 && compensation_charging_restart == 0) {
+		if(smb137b_chg->stop_smb_setting_complete == 0) {
+			smb137b_chg->cur_charging_mode |= BATT_CHG_EN_BIT; 
+			ret = smb137b_write_reg(smb137b_chg->client,
+                                        COMMAND_A_REG, smb137b_chg->cur_charging_mode);
+        		if (ret) {
+                		dev_err(&smb137b_chg->client->dev, "%s couldn't write to command_reg\n", __func__);
+        		}
+			else {
+	        		pr_info("~~~~~pz1946~~~~~ disable_charging_control\n");
+				smb137b_chg->stop_smb_setting_complete = 1;
+			}
+		}
+	}
+	else if(charging_stop_control == 0 && compensation_charging_restart == 1) {
+		if(smb137b_chg->stop_smb_setting_complete == 1) { 
+			smb137b_chg->cur_charging_mode &= ~BATT_CHG_EN_BIT; 
+                	ret = smb137b_write_reg(smb137b_chg->client,
+                                        COMMAND_A_REG, smb137b_chg->cur_charging_mode);
+                	if (ret) {
+                        	dev_err(&smb137b_chg->client->dev, "%s couldn't write to command_reg\n", __func__);
+                	}
+			else{
+	        		pr_info("~~~~~pz1946~~~~~ enable_charging_control\n");
+				smb137b_chg->stop_smb_setting_complete = 0;
+			}
+		}
+        }
+
+#endif
+
+//pz1946 20111122 AICL change 
+	smb137b_chg->smb_schedule_count++;
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
+//pz1946 20120106 charger interrupt change
+if(smb137b_chg->smb_schedule_count  > 1) {
+      if(smb_charger_state == CHG_TYPE_AC && smb137b_chg->aicl_off_complete == 0) {
+#endif
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_C_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+ //       dev_info(&smb137b_chg->client->dev,
+ //               "%s smb137b_read_reg R%x = 0x%d \n", __func__,
+ //               STATUS_C_REG, temp);
+
+                temp = ((temp & AUTO_IN_CURR_LIMIT_MASK) >> 4);
+                if (temp == 14 || temp == 15 || temp == 0) {
+                        ret = smb137b_write_reg(smb137b_chg->client,
+                        INPUT_CURRENT_LIMIT_REG, 0x04);
+                        if(ret < 0)
+                                dev_err(&smb137b_chg->client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+                }
+                else if (temp == 1) {
+                        ret = smb137b_write_reg(smb137b_chg->client,
+                        INPUT_CURRENT_LIMIT_REG, 0x24);
+                        if(ret < 0)
+                                dev_err(&smb137b_chg->client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+                }
+                else if (temp == 2) {
+                        ret = smb137b_write_reg(smb137b_chg->client,
+                        INPUT_CURRENT_LIMIT_REG, 0x44);
+                        if(ret < 0)
+                                dev_err(&smb137b_chg->client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+                }
+                else if (temp == 3 || temp == 4 || temp == 5 || temp == 6 || temp == 7) {
+                        ret = smb137b_write_reg(smb137b_chg->client,
+                        INPUT_CURRENT_LIMIT_REG, 0x64);
+                        if(ret < 0)
+                                dev_err(&smb137b_chg->client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+                }
+                else {
+                        dev_err(&smb137b_chg->client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+                }
+        }
+	smb137b_chg->smb_schedule_count = 0;
+//pz1946 20120106 AICL OFF
+	smb137b_chg->aicl_off_complete = 1;
+}
+
+//pz1946 20120106 test compensation
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
+	//pr_info("~~~~~pz1946~~~~~ charging_stop_control =%d charging_stop_setting =%d\n", charging_stop_control, smb137b_chg->charging_stop_setting);
+        if(charging_stop_control == 1) {
+		if(smb137b_chg->charging_stop_setting == 0) {
+
+		   pr_info("~~~~pz1946 charging_stop_control\n");
+//pz1946 20111230 full charging -> discharging
+		   smb137b_chg->cur_charging_mode |= BATT_CHG_EN_BIT; 
+
+		   ret = smb137b_write_reg(smb137b_chg->client,
+                      COMMAND_A_REG, smb137b_chg->cur_charging_mode);
+		  smb137b_chg->charging_stop_setting = 1;
+		}
+	 }
+	 else {
+		if(smb137b_chg->charging_stop_setting == 1) {
+
+		   pr_info("~~~~pz1946 *****charging_restart_control\n");
+
+		   smb137b_chg->cur_charging_mode &= ~BATT_CHG_EN_BIT; 
+		   ret = smb137b_write_reg(smb137b_chg->client,
+                      COMMAND_A_REG, smb137b_chg->cur_charging_mode);
+//pz1946 20120112 test
+		   if(ret) {
+		      pr_info("~~~~~I2C write fail recharing_start_fail so next time retry\n"); 	
+		      smb137b_chg->charging_stop_setting = 1;
+		   }
+		   else {
+		      smb137b_chg->charging_stop_setting = 0;
+		   }
+		}
+	}
+#endif
+
+//pz1946 timer setting register read test
+#if 0 
+                ret = smb137b_read_reg(smb137b_chg->client, CHG_CURRENT_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                CHG_CURRENT_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, INPUT_CURRENT_LIMIT_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                INPUT_CURRENT_LIMIT_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, FLOAT_VOLTAGE_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                FLOAT_VOLTAGE_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, CONTROL_A_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                CONTROL_A_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, CONTROL_B_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                CONTROL_B_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, PIN_CTRL_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                PIN_CTRL_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, OTG_LBR_CTRL_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                OTG_LBR_CTRL_REG, temp);
+
+
+                ret = smb137b_read_reg(smb137b_chg->client, FAULT_INTR_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                FAULT_INTR_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, CELL_TEMP_MON_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                CELL_TEMP_MON_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, SAFETY_TIMER_THERMAL_SHUTDOWN_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                SAFETY_TIMER_THERMAL_SHUTDOWN_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, VSYS_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                VSYS_REG, temp);
+
+
+                ret = smb137b_read_reg(smb137b_chg->client, IRQ_RESET_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                IRQ_RESET_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, COMMAND_A_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                COMMAND_A_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_A_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_A_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_B_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_B_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_C_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_C_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_D_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_D_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_E_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_F_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_F_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_G_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_G_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, STATUS_H_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                STATUS_H_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, DEV_ID_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                DEV_ID_REG, temp);
+
+                ret = smb137b_read_reg(smb137b_chg->client, COMMAND_B_REG, &temp);
+        if (ret) {
+                dev_err(&smb137b_chg->client->dev,
+                        "%s couldn't read status e reg %d\n", __func__, ret);
+        }
+        dev_info(&smb137b_chg->client->dev,
+                "%s smb137b_read_reg R%x = 0x%x \n", __func__,
+                COMMAND_B_REG, temp);
+
+#endif
 out:
 	schedule_delayed_work(&smb137b_chg->charge_work,
 					SMB137B_CHG_PERIOD);
 }
 
-static void __smb137b_otg_power(int on)
-{
-	int ret;
-
-	if (on) {
-		ret = smb137b_write_reg(usb_smb137b_chg->client,
-					PIN_CTRL_REG, PIN_CTRL_REG_CHG_OFF);
-		if (ret) {
-			pr_err("%s turning off charging in pin_ctrl err=%d\n",
-								__func__, ret);
-			/*
-			 * don't change the command register if charging in
-			 * pin control cannot be turned off
-			 */
-			return;
-		}
-
-		ret = smb137b_write_reg(usb_smb137b_chg->client,
-			COMMAND_A_REG, COMMAND_A_REG_OTG_MODE);
-		if (ret)
-			pr_err("%s failed turning on OTG mode ret=%d\n",
-								__func__, ret);
-	} else {
-		ret = smb137b_write_reg(usb_smb137b_chg->client,
-			COMMAND_A_REG, COMMAND_A_REG_DEFAULT);
-		if (ret)
-			pr_err("%s failed turning off OTG mode ret=%d\n",
-								__func__, ret);
-		ret = smb137b_write_reg(usb_smb137b_chg->client,
-				PIN_CTRL_REG, PIN_CTRL_REG_DEFAULT);
-		if (ret)
-			pr_err("%s failed writing to pn_ctrl ret=%d\n",
-								__func__, ret);
-	}
-}
 static int __devinit smb137b_probe(struct i2c_client *client,
 				    const struct i2c_device_id *id)
 {
 	const struct smb137b_platform_data *pdata;
 	struct smb137b_data *smb137b_chg;
 	int ret = 0;
-
+//pz1946 EF40K PLM 445 debug 110826
+#if defined(CONFIG_MACH_MSM8X60_EF40K) && (BOARD_REV == WS20) 
+	u8 temp;
+#endif
+//pz1946 20120106 test
+	u8 charging_check_probe = 0;
+#if 1 //N0056 GB
+	u8 temp;
+	int repeat_i; // jcpark 120914
+#endif
 	pdata = client->dev.platform_data;
 
 	if (pdata == NULL) {
@@ -638,6 +1397,10 @@ static int __devinit smb137b_probe(struct i2c_client *client,
 		ret = -EINVAL;
 		goto out;
 	}
+
+#ifdef CONFIG_SKY_SMB_CHARGER
+	dev_info(&client->dev, "[SKY CHG]%s start\n", __func__);
+#endif
 
 	if (!i2c_check_functionality(client->adapter,
 				I2C_FUNC_SMBUS_BYTE_DATA)) {
@@ -716,36 +1479,355 @@ static int __devinit smb137b_probe(struct i2c_client *client,
 		/* assume absent */
 		ret = 1;
 	}
+
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
+#if 1 // jcpark 120914
+	ret = smb137b_read_reg(smb137b_chg->client, CONTROL_A_REG, &temp);
+	if (temp != 0x4C)
+	{
+		ret = smb137b_write_reg(smb137b_chg->client,
+					  CONTROL_A_REG, 0x4C);
+		if(ret < 0)
+			dev_info(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, CONTROL_A_REG, ret);
+	}
+	
+	ret = smb137b_read_reg(smb137b_chg->client, PIN_CTRL_REG, &temp);
+	if (temp != 0x0)
+	{
+		ret = smb137b_write_reg(smb137b_chg->client,PIN_CTRL_REG, 0x0);
+		
+		if(ret < 0)
+			dev_info(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, PIN_CTRL_REG, ret);
+	}	
+
+	ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &charging_check_probe);		 
+	charging_check_probe = ((charging_check_probe & CHARGING_EN));
+
+	if(ret < 0)
+	{
+		for(repeat_i = 0; repeat_i < 5; repeat_i++)
+		{
+			msleep(100);
+			ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &charging_check_probe);		 
+			charging_check_probe = ((charging_check_probe & CHARGING_EN));
+			dev_info(&client->dev, "%s smb137b_read_reg Reg = %d, ret = %d, repeat_i = %d\n", __func__, STATUS_E_REG, ret, repeat_i);
+			if (ret >= 0)
+				break;
+		}
+	}		
+	dev_info(&smb137b_chg->client->dev,"%s charging_check_probe = 0x%x\n", __func__, charging_check_probe);
+#else
+	smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &charging_check_probe);        
+	charging_check_probe = ((charging_check_probe & CHARGING_EN));
+	pr_info("~~~~pz1946 20111214 charging_check_probe = %d\n", charging_check_probe);
+#endif
+        if(charging_check_probe == 1) { 
+		smb137b_chg->usb_status = SMB137B_PRESENT;
+		smb_charger_state = CHG_TYPE_USB;
+		smb137b_chg->charger_plug_count = 1;
+//pz1946 20111223 usb tethering sleep current
+                charger_insert_noty_event = 1;
+//pz1946 20120103 test
+		otg_power_init_count = 0;
+                msm_charger_notify_event(&smb137b_chg->adapter_hw_chg, CHG_INSERTED_EVENT);
+        }
+#else
 	if (!ret) {
 		msm_charger_notify_event(&smb137b_chg->adapter_hw_chg,
 			CHG_INSERTED_EVENT);
 		smb137b_chg->usb_status = SMB137B_PRESENT;
 	}
+#endif
+
+//pz1946 20111230 smb register value read test code
+#if 0
+      ret = smb137b_read_reg(smb137b_chg->client, CHG_CURRENT_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+		CHG_CURRENT_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, INPUT_CURRENT_LIMIT_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                INPUT_CURRENT_LIMIT_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, FLOAT_VOLTAGE_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                FLOAT_VOLTAGE_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CONTROL_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                CONTROL_A_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CONTROL_B_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                CONTROL_B_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, PIN_CTRL_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                PIN_CTRL_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, OTG_LBR_CTRL_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                OTG_LBR_CTRL_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, FAULT_INTR_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                FAULT_INTR_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, CELL_TEMP_MON_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                CELL_TEMP_MON_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, SAFETY_TIMER_THERMAL_SHUTDOWN_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                SAFETY_TIMER_THERMAL_SHUTDOWN_REG, temp);
+
+        ret = smb137b_read_reg(smb137b_chg->client, VSYS_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                VSYS_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, 0x0B, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                0x0B, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, COMMAND_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                COMMAND_A_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_A_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_A_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_B_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_B_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_C_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_C_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_D_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_D_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_E_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_E_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_F_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_F_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_G_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_G_REG, temp);
+
+       ret = smb137b_read_reg(smb137b_chg->client, STATUS_H_REG, &temp);
+        if (ret == 0)
+        dev_info(&client->dev,
+                "%s smb137b_read_reg R0x%x = 0x%x \n", __func__,
+                STATUS_H_REG, temp);
+
+#endif
 
 	ret = smb137b_read_reg(smb137b_chg->client, DEV_ID_REG,
 			&smb137b_chg->dev_id_reg);
 
 	ret = device_create_file(&smb137b_chg->client->dev, &dev_attr_id_reg);
 
+#ifdef CONFIG_SKY_SMB_CHARGER
+	ret = sysfs_create_group(&smb137b_chg->client->dev.kobj, &smb137b_sysfs_files);
+        if(ret)
+                dev_err(&client->dev, "%s fail sysfs_create_group, ret = %d\n", __func__,ret);
+#endif
+
 	/* TODO read min_design and max_design from chip registers */
 	smb137b_chg->min_design = 3200;
+#ifdef CONFIG_SKY_SMB_CHARGER
+	smb137b_chg->max_design = 4350;
+#else
 	smb137b_chg->max_design = 4200;
+#endif
 
+//pz1946 20120106 init charger check add
+#if defined(CONFIG_MACH_MSM8X60_EF39S) || defined(CONFIG_MACH_MSM8X60_EF40S) || defined(CONFIG_MACH_MSM8X60_EF40K)
+	if(smb137b_chg->charger_plug_count == 0) {
+//pr_info("~~~~~~~~smb_probe_interrupt don't create realy?\n");
 	smb137b_chg->batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
 	smb137b_chg->batt_chg_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
-
+	}
+#else
+	smb137b_chg->batt_status = POWER_SUPPLY_STATUS_DISCHARGING;
+	smb137b_chg->batt_chg_type = POWER_SUPPLY_CHARGE_TYPE_NONE;
+#endif
 	device_init_wakeup(&client->dev, 1);
 
-	mutex_lock(&init_lock);
 	usb_smb137b_chg = smb137b_chg;
-	if (init_otg_power)
-		__smb137b_otg_power(init_otg_power);
-	mutex_unlock(&init_lock);
-
 	smb137b_create_debugfs_entries(smb137b_chg);
+#ifdef CONFIG_SKY_SMB_CHARGER
+	dev_info(&client->dev,
+		"%s OK device_id = %x chg_state=%d\n", __func__,
+		smb137b_chg->dev_id_reg, smb137b_chg->usb_status);
+#else
 	dev_dbg(&client->dev,
 		"%s OK device_id = %x chg_state=%d\n", __func__,
 		smb137b_chg->dev_id_reg, smb137b_chg->usb_status);
+#endif
+//pz1946 EF40K PLM 445 debug 110826
+//#if defined(CONFIG_MACH_MSM8X60_EF40K) && (BOARD_REV == WS20) 
+//pz1946 20120824 because smb charger chip register setting problem 
+#if 0//N0056 GB defined(CONFIG_MACH_MSM8X60_EF40K) && (BOARD_REV == WS20) 
+	dev_info(&client->dev, "%s~~~~pz1946 smb register write start~~~~\n", __func__);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                        COMMAND_A_REG, COMMAND_A_REG_DEFAULT);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, COMMAND_A_REG,ret);
+	mdelay(70);	
+
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      CHG_CURRENT_REG, 0xF4);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, CHG_CURRENT_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      INPUT_CURRENT_LIMIT_REG, 0xE0);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, INPUT_CURRENT_LIMIT_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      FLOAT_VOLTAGE_REG, 0xD9);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, FLOAT_VOLTAGE_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      CONTROL_A_REG, 0x4C);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, CONTROL_A_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      CONTROL_B_REG, 0x28);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, CONTROL_B_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      PIN_CTRL_REG, 0x18);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, PIN_CTRL_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      OTG_LBR_CTRL_REG, 0x5F);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, OTG_LBR_CTRL_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      FAULT_INTR_REG, 0);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__,FAULT_INTR_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      CELL_TEMP_MON_REG, 0xD7);
+	if(ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__,CELL_TEMP_MON_REG, ret);
+        ret = smb137b_write_reg(smb137b_chg->client,
+                      SAFETY_TIMER_THERMAL_SHUTDOWN_REG, 0x4B);
+        if (ret < 0)
+	dev_err(&client->dev, "%s fail smb137b_write_reg Reg = %d, ret = %d\n", __func__, SAFETY_TIMER_THERMAL_SHUTDOWN_REG, ret);
+
+	mdelay(100);
+#endif
+#if 1// pz1946 write value checking	 //N0056 GB
+	ret = smb137b_read_reg(smb137b_chg->client, CHG_CURRENT_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		CHG_CURRENT_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, INPUT_CURRENT_LIMIT_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		INPUT_CURRENT_LIMIT_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, FLOAT_VOLTAGE_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		FLOAT_VOLTAGE_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, CONTROL_A_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		CONTROL_A_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, CONTROL_B_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		CONTROL_B_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, PIN_CTRL_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		PIN_CTRL_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, OTG_LBR_CTRL_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		OTG_LBR_CTRL_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, FAULT_INTR_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		FAULT_INTR_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, CELL_TEMP_MON_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		CELL_TEMP_MON_REG, temp);
+
+	ret = smb137b_read_reg(smb137b_chg->client, SAFETY_TIMER_THERMAL_SHUTDOWN_REG, &temp);
+	if (ret == 0)
+	dev_info(&client->dev,
+		"%s smb137b_read_reg R%d = 0x%x \n", __func__,
+		SAFETY_TIMER_THERMAL_SHUTDOWN_REG, temp);
+#endif
+
 	return 0;
 
 disable_irq_wake:
@@ -762,17 +1844,43 @@ out:
 
 void smb137b_otg_power(int on)
 {
-	pr_debug("%s Enter on=%d\n", __func__, on);
+pr_debug("%s Enter on=%d only check can't otg+power_set pz1946\n", __func__, on);
+//pz1946 20110907 EF39S EF40K EF40S OTG don't use
+#if 0 
+	int ret;
 
-	mutex_lock(&init_lock);
-	if (!usb_smb137b_chg) {
-		init_otg_power = !!on;
-		pr_warning("%s called when not initialized\n", __func__);
-		mutex_unlock(&init_lock);
-		return;
+	pr_debug("%s Enter on=%d\n", __func__, on);
+	if (on) {
+		ret = smb137b_write_reg(usb_smb137b_chg->client,
+					PIN_CTRL_REG, PIN_CTRL_REG_CHG_OFF);
+		if (ret) {
+			pr_err("%s turning off charging in pin_ctrl err=%d\n",
+								__func__, ret);
+			/*
+			 * dont change the command register if we cant
+			 * overwrite pin control
+			 */
+			return;
+		}
+
+		ret = smb137b_write_reg(usb_smb137b_chg->client,
+			COMMAND_A_REG, COMMAND_A_REG_OTG_MODE);
+		if (ret)
+			pr_err("%s failed turning on OTG mode ret=%d\n",
+								__func__, ret);
+	} else {
+		ret = smb137b_write_reg(usb_smb137b_chg->client,
+			COMMAND_A_REG, COMMAND_A_REG_DEFAULT);
+		if (ret)
+			pr_err("%s failed turning off OTG mode ret=%d\n",
+								__func__, ret);
+		ret = smb137b_write_reg(usb_smb137b_chg->client,
+				PIN_CTRL_REG, PIN_CTRL_REG_DEFAULT);
+		if (ret)
+			pr_err("%s failed writing to pn_ctrl ret=%d\n",
+								__func__, ret);
 	}
-	__smb137b_otg_power(on);
-	mutex_unlock(&init_lock);
+#endif
 }
 
 static int __devexit smb137b_remove(struct i2c_client *client)
@@ -791,6 +1899,9 @@ static int __devexit smb137b_remove(struct i2c_client *client)
 			 CHG_REMOVED_EVENT);
 	msm_charger_unregister(&smb137b_chg->adapter_hw_chg);
 	smb137b_destroy_debugfs_entries();
+#ifdef CONFIG_SKY_SMB_CHARGER
+	sysfs_remove_group(&smb137b_chg->client->dev.kobj, &smb137b_sysfs_files);
+#endif
 	kfree(smb137b_chg);
 	return 0;
 }
@@ -801,8 +1912,9 @@ static int smb137b_suspend(struct device *dev)
 	struct smb137b_data *smb137b_chg = dev_get_drvdata(dev);
 
 	dev_dbg(&smb137b_chg->client->dev, "%s\n", __func__);
-	if (smb137b_chg->charging)
-		return -EBUSY;
+//pz1946 20120106 test
+//	if (smb137b_chg->charging)
+//		return -EBUSY;
 	return 0;
 }
 

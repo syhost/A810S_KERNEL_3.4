@@ -326,6 +326,9 @@ static int __devinit pm8901_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+//20120917. CR326086
+    rc = pm8xxx_preload_dVdd();
+
 	return 0;
 
 err:

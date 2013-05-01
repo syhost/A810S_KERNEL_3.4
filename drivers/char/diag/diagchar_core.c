@@ -59,7 +59,11 @@ static unsigned int poolsize_hdlc = 8;  /*Number of items in the mempool */
 static unsigned int itemsize_write_struct = 20; /*Size of item in the mempool */
 static unsigned int poolsize_write_struct = 8; /* Num of items in the mempool */
 /* This is the max number of user-space clients supported at initialization*/
+#ifdef CONFIG_PANTECH_SKY //N0056
+static unsigned int max_clients = 17;
+#else
 static unsigned int max_clients = 15;
+#endif
 static unsigned int threshold_client_limit = 30;
 /* This is the maximum number of pkt registrations supported at initialization*/
 unsigned int diag_max_reg = 600;
@@ -865,6 +869,11 @@ static int diagchar_write(struct file *file, const char __user *buf,
 	struct diag_hdlc_dest_type enc = { NULL, NULL, 0 };
 	void *buf_copy = NULL;
 	int payload_size;
+#if 1// defined(FEATURE_DIAG_LARGE_PACKET)
+	unsigned char is_encoded = 0;
+	void *large_buf_hdlc;
+#endif
+
 #ifdef CONFIG_DIAG_OVER_USB
 	if (((driver->logging_mode == USB_MODE) && (!driver->usb_connected)) ||
 				(driver->logging_mode == NO_LOGGING_MODE)) {
@@ -877,6 +886,52 @@ static int diagchar_write(struct file *file, const char __user *buf,
 	/* First 4 bytes indicate the type of payload - ignore these */
 	payload_size = count - 4;
 
+#if 1 //defined(FEATURE_DIAG_LARGE_PACKET)
+	if(pkt_type == -3) { //-DIAG_DATA_TYPE_RESPONSE => no hdlc encode
+		is_encoded = 1;
+	} else { 
+		is_encoded = 0;
+	}
+
+	if(is_encoded) {
+		large_buf_hdlc = diagmem_alloc(driver, HDLC_OUT_BUF_SIZE, POOL_TYPE_HDLC);
+		if (!large_buf_hdlc) {
+			driver->dropped_count++;
+			return -ENOMEM;
+		}
+
+		err = copy_from_user(large_buf_hdlc, buf + 4, payload_size);
+		if (err) {
+			diagmem_free(driver, large_buf_hdlc, POOL_TYPE_HDLC);
+			printk(KERN_INFO "diagchar : copy_from_user failed \n");
+			ret = -EFAULT;
+			return ret;
+		}
+
+		mutex_lock(&driver->diagchar_mutex);
+		driver->write_ptr_svc = (struct diag_request *)
+			(diagmem_alloc(driver, sizeof(struct diag_request),
+				 POOL_TYPE_WRITE_STRUCT));
+		driver->write_ptr_svc->buf = large_buf_hdlc;
+		driver->used = payload_size; 
+		driver->write_ptr_svc->length = driver->used;
+
+		err = usb_diag_write(driver->legacy_ch, driver->write_ptr_svc);
+		if (err) {
+			printk(KERN_INFO "\n size written length[%d] error[%d] \n", driver->used, err);
+			diagmem_free(driver, large_buf_hdlc, POOL_TYPE_HDLC);
+			ret = -EIO;
+			mutex_unlock(&driver->diagchar_mutex);
+			return -EIO;
+		}
+#ifdef DIAG_DEBUG
+		printk(KERN_INFO "\n LARGE_size written is %d \n", driver->used);
+#endif
+		driver->used = 0;
+		mutex_unlock(&driver->diagchar_mutex);
+		return 0;
+	}
+#endif
 	if (pkt_type == DCI_DATA_TYPE) {
 		err = copy_from_user(driver->user_space_data, buf + 4,
 							 payload_size);
@@ -1206,7 +1261,20 @@ static int diagchar_cleanup(void)
 #ifdef CONFIG_DIAG_SDIO_PIPE
 void diag_sdio_fn(int type)
 {
-	if (machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa()) {
+	if (machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa()
+#ifdef CONFIG_MACH_MSM8X60_EF39S
+					|| machine_is_msm8x60_ef39s()
+#endif
+#ifdef CONFIG_MACH_MSM8X60_EF40S
+					|| machine_is_msm8x60_ef40s()
+#endif
+#ifdef CONFIG_MACH_MSM8X60_EF40K
+					|| machine_is_msm8x60_ef40k()
+#endif
+#ifdef CONFIG_MACH_MSM8X60_PRESTO
+					|| machine_is_msm8x60_presto()
+#endif
+	) {
 		if (type == INIT)
 			diagfwd_sdio_init();
 		else if (type == EXIT)

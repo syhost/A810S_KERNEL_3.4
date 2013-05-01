@@ -128,6 +128,15 @@ static char *static_command_line;
 static char *execute_command;
 static char *ramdisk_execute_command;
 
+#if defined (CONFIG_SKY_CHARGING) || defined (CONFIG_SKY_SMB_CHARGER) //kobj 110513, lived 110718
+static unsigned int battchg_pause_logo;
+
+unsigned int sky_charging_status(void)
+{
+	return battchg_pause_logo;
+}
+EXPORT_SYMBOL(sky_charging_status);
+#endif //CONFIG_SKY_CHARGING
 /*
  * If set, this is an indication to the drivers that reset the underlying
  * device before going ahead with the initialization otherwise driver might
@@ -513,6 +522,11 @@ asmlinkage void __init start_kernel(void)
 		   0, 0, &unknown_bootoption);
 
 	jump_label_init();
+#if defined (CONFIG_SKY_CHARGING) || defined (CONFIG_SKY_SMB_CHARGER) //kobj 110513, lived 110718
+	if (strstr(boot_command_line,"androidboot.battchg_pause=true")) {
+		battchg_pause_logo = 1;
+	}
+#endif  //CONFIG_SKY_CHARGING
 
 	/*
 	 * These use large bootmem allocations and must precede

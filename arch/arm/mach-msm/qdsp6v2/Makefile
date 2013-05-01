@@ -10,6 +10,15 @@ obj-y += snddev_hdmi.o
 obj-y += audio_mvs.o
 obj-$(CONFIG_FB_MSM_HDMI_MSM_PANEL) += lpa_if_hdmi.o
 endif
+
+#//N1066 20120410 Sound Patch
+obj-$(CONFIG_SKY_SND_EXTAMP) += sky_snd_ext_amp_max97001.o
+obj-$(CONFIG_SKY_SND_MVS) += mvs_pcm.o
+obj-$(CONFIG_SKY_SND_MVS) += mvs_amr.o
+obj-$(CONFIG_SKY_SND_MVS) += amr_transcode.o
+obj-$(CONFIG_SKY_SND_MVS) += audio_mvs_adv.o
+obj-$(CONFIG_SKY_SND_MVS) += audio_fileio.o
+
 obj-$(CONFIG_MSM_QDSP6_APR) += apr.o apr_tal.o q6core.o dsp_debug.o
 obj-y += audio_acdb.o
 ifdef CONFIG_ARCH_MSM9615

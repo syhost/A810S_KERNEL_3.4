@@ -137,9 +137,15 @@ extern struct platform_device msm_gsbi0_qup_i2c_device;
 extern struct platform_device msm_gsbi1_qup_i2c_device;
 extern struct platform_device msm_gsbi3_qup_i2c_device;
 extern struct platform_device msm_gsbi4_qup_i2c_device;
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+extern struct platform_device msm_gsbi5_qup_i2c_device;
+#endif
 extern struct platform_device msm_gsbi7_qup_i2c_device;
 extern struct platform_device msm_gsbi8_qup_i2c_device;
 extern struct platform_device msm_gsbi9_qup_i2c_device;
+#if defined(CONFIG_PN544)
+extern struct platform_device msm_gsbi10_qup_i2c_device;
+#endif
 extern struct platform_device msm_gsbi12_qup_i2c_device;
 
 extern struct platform_device msm8625_gsbi0_qup_i2c_device;
@@ -158,6 +164,9 @@ extern struct platform_device msm8625_device_adsp;
 
 extern struct platform_device msm_slim_ctrl;
 extern struct platform_device msm_device_sps;
+#ifdef CONFIG_SKY_BATTERY_MAX17040 //p14682 kobj 110607 PS2 TEAM SHS : PORTING FUEL GAUGE
+extern struct platform_device msm_gsbi11_qup_i2c_device;
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 extern struct platform_device msm_device_usb_bam;
 extern struct platform_device msm_device_sps_apq8064;
 extern struct platform_device msm_device_bam_dmux;

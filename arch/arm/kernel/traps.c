@@ -37,6 +37,10 @@
 
 #include "signal.h"
 
+#ifdef CONFIG_PANTECH_PWR_ONOFF_REASON_CNT
+#include "../mach-msm/sky_sys_reset.h"
+#endif
+
 static const char *handler[]= { "prefetch abort", "data abort", "address exception", "interrupt" };
 
 void *vectors_page;
@@ -291,6 +295,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 	add_taint(TAINT_DIE);
 	raw_spin_unlock_irq(&die_lock);
 	oops_exit();
+	
+#ifdef CONFIG_PANTECH_PWR_ONOFF_REASON_CNT
+	sky_reset_reason=SYS_RESET_REASON_LINUX;
+#endif
 
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");

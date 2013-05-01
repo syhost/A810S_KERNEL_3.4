@@ -85,6 +85,11 @@
 /* PTE EFUSE register. */
 #define QFPROM_PTE_EFUSE_ADDR		(MSM_QFPROM_BASE + 0x00C0)
 
+//pz1946 20111114 cpu_clock_low_level
+#if defined(CONFIG_SKY_SMB_CHARGER)
+extern int sky_charging_status(void);
+#endif
+
 static const void * const clk_ctl_addr[] = {SPSS0_CLK_CTL_ADDR,
 			SPSS1_CLK_CTL_ADDR};
 static const void * const clk_sel_addr[] = {SPSS0_CLK_SEL_ADDR,
@@ -1079,7 +1084,11 @@ static int __init acpuclk_8x60_probe(struct platform_device *pdev)
 	scpll_init(L2, max_freq->l2_level->l_val);
 	regulator_init();
 	bus_init();
-
+//pz1946 20111114 cpu_clock_low_level
+#if defined(CONFIG_SKY_SMB_CHARGER)
+	if(sky_charging_status())
+		max_freq->acpuclk_khz = 384000;
+#endif
 	/* Improve boot time by ramping up CPUs immediately. */
 	for_each_online_cpu(cpu)
 		acpuclk_8x60_set_rate(cpu, max_freq->acpuclk_khz, SETRATE_INIT);

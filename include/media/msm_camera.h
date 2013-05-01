@@ -616,6 +616,9 @@ struct msm_frame {
 	struct ion_allocation_data ion_alloc;
 	struct ion_fd_data fd_data;
 	int ion_dev_fd;
+#ifdef CONFIG_PANTECH_CAMERA//IRQ
+	uint32_t irq_stat;
+#endif
 };
 
 enum msm_st_frame_packing {
@@ -800,6 +803,41 @@ struct msm_snapshot_pp_status {
 #define CFG_SENSOR_INIT    29
 #define CFG_GET_3D_CALI_DATA 30
 #define CFG_GET_CALIB_DATA		31
+#if 1//pangya Start [[
+#ifdef CONFIG_PANTECH_CAMERA
+#define CFG_AUTO_FOCUS			32
+#define CFG_SET_ISO			33
+#define CFG_SET_SCENE_MODE		34
+#define CFG_SET_FOCUS_STEP		35
+#define CFG_SET_SZOOM			36
+#define CFG_SET_ANTISHAKE		37
+#define CFG_SET_FOCUS_RECT		38
+#if 1 //def F_PANTECH_CAMERA_FIX_CFG_LED_MODE
+#define CFG_SET_LED_MODE		39
+#endif
+#if 1 //def F_PANTECH_CAMERA_ADD_CFG_DIMENSION
+#define CFG_SET_DIMENSION		40
+#endif
+#ifdef CONFIG_PANTECH_CAMERA_TUNER
+#define CFG_SET_TUNER			41
+#endif
+#define CFG_SET_REFLECT			42
+#define CFG_SET_PREVIEW_FPS		43
+#define CFG_SET_CONTINUOUS_AF		44
+#define CFG_UPDATE_ISP			45
+#define CFG_GET_REG				46
+#define CFG_SET_CAF_CAMERA 	47
+#define CFG_SET_WDR			48
+#define CFG_STOP_CAPTURE		49
+#define CFG_GET_OUTPUT_INFO		50
+#define CFG_GET_EEPROM_DATA		51
+#define CFG_SET_ACTUATOR_INFO		52
+#define CFG_GET_ACTUATOR_INFO		53
+#define CFG_MAX					54
+#else
+#define CFG_MAX			32
+#endif
+#else//pangya
 #define CFG_GET_OUTPUT_INFO		32
 #define CFG_GET_EEPROM_INFO		33
 #define CFG_GET_EEPROM_DATA		34
@@ -817,7 +855,7 @@ struct msm_snapshot_pp_status {
 #define CFG_STOP_STREAM               45
 #define CFG_GET_CSI_PARAMS            46
 #define CFG_MAX			47
-
+#endif//pangya End ]]
 
 #define MOVE_NEAR	0
 #define MOVE_FAR	1
@@ -1103,6 +1141,23 @@ struct sensor_calib_data {
 	uint16_t af_pos_1m;
 	uint16_t af_pos_inf;
 };
+#if 1 //def F_PANTECH_CAMERA_1080P_PREVIEW
+struct dimension_cfg {
+	uint16_t prev_dx;
+	uint16_t prev_dy;
+	uint16_t pict_dx;
+	uint16_t pict_dy;
+	uint16_t video_dx;
+	uint16_t video_dy;
+};
+#endif
+
+#ifdef CONFIG_PANTECH_CAMERA_TUNER
+struct tuner_cfg {
+	uint8_t *fbuf;
+	uint32_t fsize;
+};
+#endif
 
 enum msm_sensor_resolution_t {
 	MSM_SENSOR_RES_FULL,
@@ -1276,6 +1331,31 @@ struct sensor_cfg_data {
 		struct wb_info_cfg wb_info;
 		struct sensor_3d_exp_cfg sensor_3d_exp;
 		struct sensor_calib_data calib_info;
+#ifdef CONFIG_PANTECH_CAMERA
+		int8_t whitebalance;
+		int8_t brightness;
+		int32_t led_mode;
+		int8_t iso;
+		int32_t scene_mode;
+		int32_t focus_step;
+		int32_t szoom;
+		int32_t antishake;
+		int32_t exposure;
+		uint32_t focus_rect; /* xleft, xright, ytop, ybottom */
+#if 1 //def F_PANTECH_CAMERA_ADD_CFG_DIMENSION
+		struct dimension_cfg dimension;
+#endif
+//		int32_t antibanding;
+		int32_t preview_fps;
+		int32_t continuous_af;
+#ifdef CONFIG_PANTECH_CAMERA_TUNER
+		struct tuner_cfg tuner;
+#endif
+		int32_t reflect;
+		int32_t isp_bin_vaddr;
+		int32_t reg;
+		int32_t wdr;
+#endif
 		struct sensor_output_info_t output_info;
 		struct msm_eeprom_data_t eeprom_data;
 		struct csi_lane_params_t csi_lane_params;
@@ -1284,7 +1364,6 @@ struct sensor_cfg_data {
 		uint8_t contrast;
 		uint8_t saturation;
 		uint8_t sharpness;
-		int8_t brightness;
 		int ae_mode;
 		uint8_t wb_val;
 		int8_t exp_compensation;

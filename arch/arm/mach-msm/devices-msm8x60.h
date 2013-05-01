@@ -23,6 +23,20 @@
 #define MSM_SSBI2_I2C_BUS_ID     7
 #define MSM_SSBI3_I2C_BUS_ID     8
 
+#define MSM_LED_I2C_BUS_ID 10
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+#define MSM_GSBI5_QUP_I2C_BUS_ID 33
+#endif
+#if defined(CONFIG_PN544)
+#define MSM_GSBI10_QUP_I2C_BUS_ID 21
+#endif
+#ifdef CONFIG_SKY_SMB_CHARGER
+#define MSM_SMB_I2C_BUS_ID 39
+#endif
+
+#ifdef CONFIG_SKY_BATTERY_MAX17040   // p14682 kobj  110607 
+#define MSM_GSBI11_QUP_I2C_BUS_ID	16
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 #ifdef CONFIG_SND_SOC_MSM8660_APQ
 extern struct platform_device msm_pcm;
 extern struct platform_device msm_pcm_routing;

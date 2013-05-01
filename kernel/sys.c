@@ -462,6 +462,11 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	mutex_lock(&reboot_mutex);
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
+#ifdef CONFIG_PANTECH_EXT4_RO_REMOUNT_ON_EMERGENCY_RESET
+	case LINUX_REBOOT_CMD_RMNT_RESTART:
+		//if (cmd == LINUX_REBOOT_CMD_RMNT_RESTART)
+			emergency_remount_synchronous();
+#endif
 		kernel_restart(NULL);
 		break;
 
@@ -474,22 +479,38 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		break;
 
 	case LINUX_REBOOT_CMD_HALT:
+#ifdef CONFIG_PANTECH_EXT4_RO_REMOUNT_ON_EMERGENCY_RESET
+	case LINUX_REBOOT_CMD_RMNT_HALT:
+		//if (cmd == LINUX_REBOOT_CMD_RMNT_HALT)
+			emergency_remount_synchronous();
+#endif
 		kernel_halt();
 		do_exit(0);
 		panic("cannot halt");
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
+	case LINUX_REBOOT_CMD_RMNT_POWER_OFF:
+#ifdef CONFIG_PANTECH_EXT4_RO_REMOUNT_ON_EMERGENCY_RESET
+		//if (cmd == LINUX_REBOOT_CMD_RMNT_POWER_OFF)
+			emergency_remount_synchronous();
+#endif
 		kernel_power_off();
 		do_exit(0);
 		break;
 
 	case LINUX_REBOOT_CMD_RESTART2:
+#ifdef CONFIG_PANTECH_EXT4_RO_REMOUNT_ON_EMERGENCY_RESET
+	case LINUX_REBOOT_CMD_RMNT_RESTART2:
+#endif
 		if (strncpy_from_user(&buffer[0], arg, sizeof(buffer) - 1) < 0) {
 			ret = -EFAULT;
 			break;
 		}
 		buffer[sizeof(buffer) - 1] = '\0';
-
+#ifdef CONFIG_PANTECH_EXT4_RO_REMOUNT_ON_EMERGENCY_RESET
+		//if (cmd == LINUX_REBOOT_CMD_RMNT_RESTART2)
+			emergency_remount_synchronous();
+#endif
 		kernel_restart(buffer);
 		break;
 

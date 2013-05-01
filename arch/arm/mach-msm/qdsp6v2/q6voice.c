@@ -2446,6 +2446,23 @@ static void voice_auddev_cb_function(u32 evt_id,
 }
 EXPORT_SYMBOL(voice_auddev_cb_function);
 
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch from EF33S
+int voice_set_voc_path_full_reset(void) // abnormal process reset.
+{
+	int rc = 0;
+
+	pr_info("%s\n", __func__);
+
+	mutex_lock(&common.common_lock);
+
+    common.voc_path = VOC_PATH_PASSIVE;
+
+	mutex_unlock(&common.common_lock);
+
+	return rc;
+
+}
+#endif
 int voice_set_voc_path_full(uint32_t set)
 {
 	pr_info("%s: %d\n", __func__, set);

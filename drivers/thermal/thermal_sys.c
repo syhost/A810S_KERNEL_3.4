@@ -1122,7 +1122,8 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 				if (!ret) {
 					pr_emerg("Critical temperature reached (%ld C), shutting down\n",
 						 temp/1000);
-					orderly_poweroff(true);
+					//jcpark 120719 EF40S GB code review
+					//orderly_poweroff(true);
 				}
 			}
 			break;
@@ -1150,7 +1151,9 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 				printk(KERN_EMERG
 				"Critical temperature reached (%ld C), \
 					shutting down.\n", temp/1000);
-				orderly_poweroff(true);
+
+				//jcpark 120719 EF40S GB code review
+				//orderly_poweroff(true);
 				}
 			}
 			break;

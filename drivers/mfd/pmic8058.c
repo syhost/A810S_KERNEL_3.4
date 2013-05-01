@@ -172,6 +172,9 @@ static const struct resource pm8058_charger_resources[] __devinitconst = {
 	SINGLE_IRQ_RESOURCE("BATT_REPLACE",	PM8058_BATT_REPLACE_IRQ),
 	SINGLE_IRQ_RESOURCE("BATTCONNECT",	PM8058_BATTCONNECT_IRQ),
 	SINGLE_IRQ_RESOURCE("VBATDET_LOW",	PM8058_VBATDET_LOW_IRQ),
+#if defined(CONFIG_SKY_CHARGING) || defined(CONFIG_SKY_SMB_CHARGER)
+	SINGLE_IRQ_RESOURCE("BATT_ID_CHANGED",	PM8058_BATT_ID_IRQ),
+#endif
 };
 
 static struct mfd_cell pm8058_charger_cell __devinitdata = {

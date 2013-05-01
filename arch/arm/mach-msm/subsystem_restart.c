@@ -36,6 +36,9 @@
 
 #include "smd_private.h"
 
+#ifdef CONFIG_PANTECH_PWR_ONOFF_REASON_CNT
+#include "sky_sys_reset.h"
+#endif
 struct subsys_soc_restart_order {
 	const char * const *subsystem_list;
 	int count;
@@ -486,6 +489,9 @@ int subsystem_restart(const char *subsys_name)
 		break;
 
 	case RESET_SOC:
+#ifdef CONFIG_PANTECH_PWR_ONOFF_REASON_CNT
+                        sky_reset_reason=SYS_RESET_REASON_MDM_EXCEPTION;
+#endif
 		panic("subsys-restart: Resetting the SoC - %s crashed.",
 			subsys->name);
 		break;

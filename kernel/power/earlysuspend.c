@@ -70,27 +70,37 @@ void unregister_early_suspend(struct early_suspend *handler)
 }
 EXPORT_SYMBOL(unregister_early_suspend);
 
+int early_suspend_State=0;
+int late_resume_State=0;
+
 static void early_suspend(struct work_struct *work)
 {
 	struct early_suspend *pos;
 	unsigned long irqflags;
 	int abort = 0;
 
+	early_suspend_State=0;
+	
 	mutex_lock(&early_suspend_lock);
+	early_suspend_State=5;
 	spin_lock_irqsave(&state_lock, irqflags);
+	early_suspend_State=10;
 	if (state == SUSPEND_REQUESTED)
 		state |= SUSPENDED;
 	else
 		abort = 1;
 	spin_unlock_irqrestore(&state_lock, irqflags);
 
+	early_suspend_State=20;
 	if (abort) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("early_suspend: abort, state %d\n", state);
+		early_suspend_State=30;
 		mutex_unlock(&early_suspend_lock);
 		goto abort;
 	}
 
+	early_suspend_State=40;
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("early_suspend: call handlers\n");
 	list_for_each_entry(pos, &early_suspend_handlers, link) {
@@ -98,16 +108,24 @@ static void early_suspend(struct work_struct *work)
 			if (debug_mask & DEBUG_VERBOSE)
 				pr_info("early_suspend: calling %pf\n", pos->suspend);
 			pos->suspend(pos);
+			early_suspend_State++;
 		}
 	}
+	early_suspend_State=50;
 	mutex_unlock(&early_suspend_lock);
 
+	early_suspend_State=60;
 	suspend_sys_sync_queue();
+	early_suspend_State=70;
+
+
 abort:
+	early_suspend_State=80;
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPEND_REQUESTED_AND_SUSPENDED)
 		wake_unlock(&main_wake_lock);
 	spin_unlock_irqrestore(&state_lock, irqflags);
+	early_suspend_State=90;
 }
 
 static void late_resume(struct work_struct *work)
@@ -116,19 +134,26 @@ static void late_resume(struct work_struct *work)
 	unsigned long irqflags;
 	int abort = 0;
 
+	late_resume_State=0;
 	mutex_lock(&early_suspend_lock);
+	late_resume_State=5;
 	spin_lock_irqsave(&state_lock, irqflags);
+	late_resume_State=10;
 	if (state == SUSPENDED)
 		state &= ~SUSPENDED;
 	else
 		abort = 1;
 	spin_unlock_irqrestore(&state_lock, irqflags);
+	late_resume_State=20;
 
 	if (abort) {
 		if (debug_mask & DEBUG_SUSPEND)
 			pr_info("late_resume: abort, state %d\n", state);
+		late_resume_State=30;
 		goto abort;
 	}
+
+	late_resume_State=40;
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: call handlers\n");
 	list_for_each_entry_reverse(pos, &early_suspend_handlers, link) {
@@ -137,13 +162,18 @@ static void late_resume(struct work_struct *work)
 				pr_info("late_resume: calling %pf\n", pos->resume);
 
 			pos->resume(pos);
+			late_resume_State++;
 		}
 	}
+	late_resume_State=50;
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: done\n");
 abort:
+	late_resume_State=60;
 	mutex_unlock(&early_suspend_lock);
+	late_resume_State=70;
 }
+
 
 void request_suspend_state(suspend_state_t new_state)
 {

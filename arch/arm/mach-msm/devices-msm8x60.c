@@ -430,6 +430,50 @@ static struct resource gsbi4_qup_i2c_resources[] = {
 	},
 };
 
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+static struct resource gsbi5_qup_i2c_resources[] = {
+	{
+		.name	= "qup_phys_addr",
+		.start	= MSM_GSBI5_QUP_PHYS,
+		.end	= MSM_GSBI5_QUP_PHYS + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name	= "gsbi_qup_i2c_addr",
+		.start	= MSM_GSBI5_PHYS,
+		.end	= MSM_GSBI5_PHYS + 4 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name	= "qup_err_intr",
+		.start	= GSBI5_QUP_IRQ,
+		.end	= GSBI5_QUP_IRQ,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+#endif
+#ifdef CONFIG_SKY_BATTERY_MAX17040 // p14682 kobj 110607ps2 team shs : add fuel gauge
+static struct resource gsbi11_qup_i2c_resources[] = {
+	 {
+		.name   = "qup_phys_addr",
+		.start  = MSM_GSBI11_QUP_PHYS,
+		.end    = MSM_GSBI11_QUP_PHYS + SZ_4K - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+	{
+		.name   = "gsbi_qup_i2c_addr",
+		.start  = MSM_GSBI11_PHYS,
+		.end    = MSM_GSBI11_PHYS + 4 - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+	{
+		.name   = "qup_err_intr",
+		.start  = GSBI11_QUP_IRQ,
+		.end    = GSBI11_QUP_IRQ,
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+#endif  //CONFIG_SKY_BATTERY_MAX17040
 static struct resource gsbi7_qup_i2c_resources[] = {
 	{
 		.name	= "qup_phys_addr",
@@ -504,6 +548,29 @@ static struct resource gsbi9_qup_i2c_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 };
+
+#if defined(CONFIG_PN544)
+static struct resource gsbi10_qup_i2c_resources[] = {
+    {
+        .name   = "qup_phys_addr",
+        .start  = MSM_GSBI10_QUP_PHYS,
+        .end    = MSM_GSBI10_QUP_PHYS + SZ_4K - 1,
+        .flags  = IORESOURCE_MEM,
+    },
+    {
+        .name   = "gsbi_qup_i2c_addr",
+        .start  = MSM_GSBI10_PHYS,
+        .end    = MSM_GSBI10_PHYS + 4 - 1,
+        .flags  = IORESOURCE_MEM,
+    },
+    {
+        .name   = "qup_err_intr",
+        .start  = GSBI10_QUP_IRQ,
+        .end    = GSBI10_QUP_IRQ,
+        .flags  = IORESOURCE_IRQ,
+    },
+};
+#endif
 
 static struct resource gsbi12_qup_i2c_resources[] = {
 	{
@@ -875,6 +942,23 @@ struct platform_device msm_gsbi4_qup_i2c_device = {
 	.resource	= gsbi4_qup_i2c_resources,
 };
 
+#if defined(CONFIG_EF39S_SENSORS_MPU3050) || defined(CONFIG_EF40K_SENSORS_MPU3050) || defined(CONFIG_EF40S_SENSORS_MPU3050)
+/* Use GSBI5 QUP for /dev/i2c-1 */
+struct platform_device msm_gsbi5_qup_i2c_device = {
+	.name		= "qup_i2c",
+	.id		= MSM_GSBI5_QUP_I2C_BUS_ID,
+	.num_resources	= ARRAY_SIZE(gsbi5_qup_i2c_resources),
+	.resource	= gsbi5_qup_i2c_resources,
+};
+#endif
+#ifdef CONFIG_SKY_BATTERY_MAX17040 // p14682 kobj 110607ps2 team shs : fuel gauge porting
+struct platform_device msm_gsbi11_qup_i2c_device = {
+	 .name           = "qup_i2c",
+	.id             = MSM_GSBI11_QUP_I2C_BUS_ID,
+	.num_resources  = ARRAY_SIZE(gsbi11_qup_i2c_resources),
+	.resource       = gsbi11_qup_i2c_resources,
+};
+#endif
 /* Use GSBI8 QUP for /dev/i2c-3 */
 struct platform_device msm_gsbi8_qup_i2c_device = {
 	.name		= "qup_i2c",
@@ -898,6 +982,16 @@ struct platform_device msm_gsbi7_qup_i2c_device = {
 	.num_resources	= ARRAY_SIZE(gsbi7_qup_i2c_resources),
 	.resource	= gsbi7_qup_i2c_resources,
 };
+
+#if defined(CONFIG_PN544)
+/* Use GSBI2 QUP for /dev/i2c-13 */
+struct platform_device msm_gsbi10_qup_i2c_device = {
+    .name           = "qup_i2c",
+    .id             = MSM_GSBI10_QUP_I2C_BUS_ID,
+    .num_resources  = ARRAY_SIZE(gsbi10_qup_i2c_resources),
+    .resource       = gsbi10_qup_i2c_resources,
+};
+#endif /* CONFIG_PN544 */
 
 /* Use GSBI12 QUP for /dev/i2c-5 (Sensors) */
 struct platform_device msm_gsbi12_qup_i2c_device = {
@@ -1027,6 +1121,7 @@ struct platform_device msm_gsbi1_qup_spi_device = {
 };
 
 
+#if !defined(CONFIG_PN544)
 static struct resource gsbi10_qup_spi_resources[] = {
 	{
 		.name	= "spi_base",
@@ -1073,6 +1168,7 @@ struct platform_device msm_gsbi10_qup_spi_device = {
 	.num_resources	= ARRAY_SIZE(gsbi10_qup_spi_resources),
 	.resource	= gsbi10_qup_spi_resources,
 };
+#endif
 #define MSM_SDC1_BASE         0x12400000
 #define MSM_SDC1_DML_BASE     (MSM_SDC1_BASE + 0x800)
 #define MSM_SDC1_BAM_BASE     (MSM_SDC1_BASE + 0x2000)

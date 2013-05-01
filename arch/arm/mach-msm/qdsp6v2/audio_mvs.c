@@ -26,6 +26,10 @@
 
 #include <mach/qdsp6v2/q6voice.h>
 #include <mach/cpuidle.h>
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+#include "audio_mvs_adv.h"
+#include "sky_snd_ext_amp_max97001.h"
+#endif
 
 /* Each buffer is 20 ms, queue holds 200 ms of data. */
 #define MVS_MAX_Q_LEN 10
@@ -90,6 +94,55 @@ static uint32_t audio_mvs_get_rate(uint32_t mvs_mode, uint32_t rate_type)
 	return cvs_rate;
 }
 
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+static void audio_mvs_process_ul_pkt(uint8_t *voc_pkt,
+				     uint32_t pkt_len,
+				     void *private_data)
+{
+	struct audio_mvs_info_type *audio = private_data;
+	unsigned long dsp_flags;
+
+	spin_lock_irqsave(&audio->dsp_lock, dsp_flags);
+       if(mvs_adv_get_state()<MVS_START)      {
+            //pr_info("%s: playback is not ready(state=%d)\n", __func__, bf.tx.state);   
+            spin_unlock_irqrestore(&audio->dsp_lock, dsp_flags);
+            return;
+       }
+       
+	if(audio->mvs_mode==MVS_MODE_AMR) {
+           audio_adv_mvs_process_amr_uplink(voc_pkt, pkt_len, private_data);
+	}
+       else {
+           audio_adv_mvs_process_pcm_uplink(voc_pkt, pkt_len, private_data); 
+       }
+	spin_unlock_irqrestore(&audio->dsp_lock, dsp_flags);
+}
+
+static void audio_mvs_process_dl_pkt(uint8_t *voc_pkt,
+				     uint32_t *pkt_len,
+				     void *private_data)
+{
+	struct audio_mvs_info_type *audio = private_data;
+	unsigned long dsp_flags;
+  
+	spin_lock_irqsave(&audio->dsp_lock, dsp_flags);
+
+       if(mvs_adv_get_state()<MVS_START)      {
+            //pr_info("%s: playback is not ready(state=%d)\n", __func__, bf.rx.state);   
+            *pkt_len = 0;
+            spin_unlock_irqrestore(&audio->dsp_lock, dsp_flags);
+            return;
+       }
+
+	if(audio->mvs_mode==MVS_MODE_AMR) {
+            audio_adv_mvs_process_amr_downlink(voc_pkt, pkt_len, private_data);
+	}
+       else {
+            audio_adv_mvs_process_pcm_downlink(voc_pkt, pkt_len, private_data);
+       }
+	spin_unlock_irqrestore(&audio->dsp_lock, dsp_flags);
+}
+#else // CONFIG_SKY_SND_MVS
 static void audio_mvs_process_ul_pkt(uint8_t *voc_pkt,
 				     uint32_t pkt_len,
 				     void *private_data)
@@ -597,6 +650,7 @@ static void audio_mvs_process_dl_pkt(uint8_t *voc_pkt,
 	spin_unlock_irqrestore(&audio->dsp_lock, dsp_flags);
 	wake_up(&audio->in_wait);
 }
+#endif // CONFIG_SKY_SND_MVS
 
 static uint32_t audio_mvs_get_media_type(uint32_t mvs_mode, uint32_t rate_type)
 {
@@ -689,7 +743,11 @@ static uint32_t audio_mvs_get_network_type(uint32_t mvs_mode)
 	case MVS_MODE_PCM:
 	case MVS_MODE_G729A:
 	case MVS_MODE_G711A:
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+		network_type = 0x00010021;//VSS_NETWORK_ID_CDMA_NB;
+#else
 		network_type = VSS_NETWORK_ID_VOIP_NB;
+#endif
 		break;
 
 	case MVS_MODE_4GV_WB:
@@ -720,10 +778,18 @@ static int audio_mvs_start(struct audio_mvs_info_type *audio)
 
 	rc = voice_set_voc_path_full(1);
 
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+        mvs_adv_buf_init();
+#endif
+
 	if (rc == 0) {
 		voice_register_mvs_cb(audio_mvs_process_ul_pkt,
 				      audio_mvs_process_dl_pkt,
 				      audio);
+
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+               mvs_adv_set_state(MVS_START);
+#endif
 
 		voice_config_vocoder(
 		    audio_mvs_get_media_type(audio->mvs_mode, audio->rate_type),
@@ -749,6 +815,10 @@ static int audio_mvs_stop(struct audio_mvs_info_type *audio)
 	voice_set_voc_path_full(0);
 
 	audio->state = AUDIO_MVS_STOPPED;
+
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+       mvs_adv_set_state(MVS_STOP);
+#endif
 
 	/* Allow sleep. */
 	pm_qos_update_request(&audio->pm_qos_req, PM_QOS_DEFAULT_VALUE);
@@ -819,7 +889,14 @@ static int audio_mvs_release(struct inode *inode, struct file *file)
 	mutex_lock(&audio->lock);
 
 	if (audio->state == AUDIO_MVS_STARTED)
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+		if(audio_mvs_stop(audio)<0) {
+                    mutex_unlock(&audio->lock);
+                    return -ENOMEM;
+              }
+#else
 		audio_mvs_stop(audio);
+#endif
 
 	/* Free input and output memory. */
 	mutex_lock(&audio->in_lock);
@@ -855,6 +932,10 @@ static int audio_mvs_release(struct inode *inode, struct file *file)
 	audio->memory_chunk = NULL;
 
 	audio->state = AUDIO_MVS_CLOSED;
+
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+       mvs_adv_set_state(MVS_CLOSE);
+#endif
 
 	mutex_unlock(&audio->lock);
 
@@ -1102,6 +1183,31 @@ static long audio_mvs_ioctl(struct file *file,
 
 		break;
 	}
+#ifdef CONFIG_SKY_SND_MVS //N1066 20120410 Sound Patch
+       case AUDIO_GET_CURRENT_STATUS:        {
+              int mvs_state;
+		pr_info("%s: IOCTL GET_CURRENT_STATUS, (%d)\n", __func__, mvs_adv_get_state());
+
+		mutex_lock(&audio->lock);
+              //mvs_state=mvs_adv_get_state()==MVS_START? 1:0;
+              if(snd_extamp_get_current_callmode())    mvs_state=1;
+              else mvs_state=0;
+		mutex_unlock(&audio->lock);
+
+		rc = copy_to_user((void *)arg, &mvs_state, sizeof(mvs_state));
+		if (rc == 0)
+			rc = sizeof(mvs_state);
+		else
+			pr_err("%s: Config copy failed %d\n", __func__, rc);
+              if(mvs_state) {
+                     // This means that previous MVS call was abnormally finished.
+                     // So we reset whole parameters.
+                     voice_set_voc_path_full_reset();
+                     snd_extamp_api_reset();
+              }
+              break;
+       }
+#endif
 
 	default: {
 		pr_err("%s: Unknown IOCTL %d\n", __func__, cmd);

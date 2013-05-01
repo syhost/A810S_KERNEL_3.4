@@ -1385,6 +1385,7 @@ int q6asm_open_write(struct audio_client *ac, uint32_t format)
 {
 	int rc = 0x00;
 	struct asm_stream_cmd_open_write open;
+   static int if_first_open_write = 1; // Qualcomm-sr 20120730 N1026
 
 	if ((ac == NULL) || (ac->apr == NULL)) {
 		pr_err("%s: APR handle NULL\n", __func__);
@@ -1393,6 +1394,13 @@ int q6asm_open_write(struct audio_client *ac, uint32_t format)
 	pr_debug("%s: session[%d] wr_format[0x%x]", __func__, ac->session,
 		format);
 
+    //make sure Q6 is ready before sending the STREAM_CMD_OPEN_WRITE  // Qualcomm-sr 20120730 N1026
+   if(if_first_open_write == 1) 
+   { 
+     msleep(30); 
+     if_first_open_write = 0; 
+   } 
+   
 	q6asm_add_hdr(ac, &open.hdr, sizeof(open), TRUE);
 
 	open.hdr.opcode = ASM_STREAM_CMD_OPEN_WRITE;
