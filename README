@@ -1,0 +1,6 @@
+caf 3.4 kernel for A810S
+BUGS:
+Camera(open camera case freeze)
+Charging status
+WIFI
+Shutdown(can not boot when use system shutdown,reboot is fine)
